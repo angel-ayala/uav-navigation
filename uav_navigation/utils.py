@@ -144,13 +144,13 @@ class PreprocessObservation(gym.core.Wrapper):
 
     def step(self, action):
         obs, rews, terminateds, truncateds, infos = self.env.step(action)
-        return self.preprocess(obs), rews, terminateds, truncateds, infos
+        return self.preprocess_fn(obs), rews, terminateds, truncateds, infos
 
     def reset(self, **kwargs):
         """Resets the environment and normalizes the observation."""
         obs, info = self.env.reset(**kwargs)
 
-        return self.preprocess(obs), info
+        return self.preprocess_fn(obs), info
 
     def preprocess_pixels(self, obs):
         return obs.astype(np.float32) / 255.
