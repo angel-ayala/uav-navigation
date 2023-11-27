@@ -11,7 +11,7 @@ setup(
     author_email='aaam@ecomp.poli.br',
     license='GPL-3.0',
     packages=[package_name],
-    install_requires=['gym==0.26.0''],
+    install_requires=['gym==0.26.0'],
     classifiers=[
         'Development Status :: 5 - Production/Stable',
         'Intended Audience :: Science/Research',
