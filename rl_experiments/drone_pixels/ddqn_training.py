@@ -60,7 +60,7 @@ print(agent_params['action_space_shape'])
 agent = DQNAgent(**agent_params)
 
 # Summary folder
-folder_name = './logs/cartpole_' + datetime.datetime.now(
+folder_name = './logs/ddqn_' + datetime.datetime.now(
     ).strftime('%Y-%m-%d_%H-%M-%S')
 folder_name = Path(folder_name)
 folder_name.mkdir(parents=True)

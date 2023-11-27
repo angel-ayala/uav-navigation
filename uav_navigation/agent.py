@@ -113,10 +113,8 @@ class DQNAgent:
         else:
             state_tensor = torch.tensor(
                 state, dtype=torch.float32).unsqueeze(0)
-            # print('state_tensor', state_tensor)
             with torch.no_grad():
                 q_values = self.q_network(state_tensor).numpy()
-            # print('q_values', q_values)
             return np.argmax(q_values)  # Exploit
 
     def update(self, state, action, reward, next_state, done):

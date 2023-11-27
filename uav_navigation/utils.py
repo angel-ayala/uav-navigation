@@ -156,5 +156,4 @@ class PreprocessObservation(gym.core.Wrapper):
         return obs.astype(np.float32) / 255.
 
     def preprocess_vector(self, obs):
-        print(obs)
         return obs
