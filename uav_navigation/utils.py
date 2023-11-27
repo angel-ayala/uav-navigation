@@ -11,6 +11,8 @@ import copy
 import numpy as np
 from tqdm import tqdm
 
+from webots_drone.utils import min_max_norm
+
 
 def save_dict_json(dict2save, json_path):
     proc_dic = dict2save.copy()
@@ -156,4 +158,8 @@ class PreprocessObservation(gym.core.Wrapper):
         return obs.astype(np.float32) / 255.
 
     def preprocess_vector(self, obs):
+        # Normalize angular values
+        obs[3] = min_max_norm(obs[3], a=-1, b=1, minx=-np.pi, maxx=np.pi)
+        obs[4] = min_max_norm(obs[4], a=-1, b=1, minx=-np.pi/2, maxx=np.pi/2)
+        obs[5] = min_max_norm(obs[5], a=-1, b=1, minx=-np.pi, maxx=np.pi)
         return obs
