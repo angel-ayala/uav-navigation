@@ -46,7 +46,7 @@ env = PreprocessObservation(env, is_pixels=is_pixels)
 agent_params = dict(state_space_shape=env.observation_space.shape,
                     action_space_shape=(env.action_space.n, ),
                     approximator=QFeaturesNetwork,
-                    device='cpu',
+                    device='cuda' if torch.cuda.is_available() else 'cpu',
                     learning_rate=0.0001,
                     discount_factor=0.99,
                     epsilon_start=0.5,
