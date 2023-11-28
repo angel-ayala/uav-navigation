@@ -62,17 +62,17 @@ class AEDDQNAgent(DDQNAgent):
 
         self.encoder = self.q_network.encoder
 
-        if type(approximator) == VectorApproximator:
+        if approximator == VectorApproximator:
             self.decoder = MLP(self.encoder.feature_dim,
                                state_space_shape[0], latent_dim)
-        if type(approximator) == PixelApproximator:
+        if approximator == PixelApproximator:
             self.decoder = PixelDecoder(state_space_shape,
                                         self.encoder.feature_dim,
                                         num_layers=num_layers,
                                         num_filters=num_filters
                                         ).to(self.device)
-        if self.decoder is None:
-            raise 'Error, no decoder indicated.'
+        if not hasattr(self, 'decoder'):
+            raise ValueError(f"Error, no decoder for {type(approximator)}.")
         self.decoder_latent_lambda = decoder_latent_lambda
         self.decoder.apply(weight_init)
 
