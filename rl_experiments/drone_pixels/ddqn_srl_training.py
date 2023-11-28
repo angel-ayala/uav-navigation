@@ -13,9 +13,12 @@ import gym
 import datetime
 from pathlib import Path
 from uav_navigation.srl.agent import AEDDQNAgent
+from uav_navigation.srl.autoencoder import PixelDecoder
+from uav_navigation.srl.net import PixelApproximator
 from uav_navigation.utils import save_dict_json
 from uav_navigation.utils import train_eval_agent
 from uav_navigation.utils import PreprocessObservation
+
 
 from webots_drone.data import StoreStepData
 
@@ -46,6 +49,7 @@ agent_params = dict(
     state_space_shape=env.observation_space.shape,
     action_space_shape=(env.action_space.n, ),
     device='cuda' if torch.cuda.is_available() else 'cpu',
+    approximator=PixelApproximator,
     approximator_lr=1e-3,
     approximator_beta=0.9,
     approximator_tau=0.005,
@@ -55,6 +59,7 @@ agent_params = dict(
     epsilon_decay=0.9999,
     buffer_capacity=2048,
     encoder_lr=1e-3,
+    decoder='pixel',
     decoder_lr=1e-3,
     decoder_latent_lambda=1e-6,
     decoder_weight_lambda=1e-7)

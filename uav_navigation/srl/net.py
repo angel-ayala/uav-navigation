@@ -28,7 +28,7 @@ def weight_init(m):
         nn.init.orthogonal_(m.weight.data[:, :, mid, mid], gain)
 
 
-class QFunction(nn.Module):
+class MLP(nn.Module):
     """MLP for q-function."""
 
     def __init__(self, n_input, n_output, hidden_dim):
@@ -40,8 +40,37 @@ class QFunction(nn.Module):
             nn.Linear(hidden_dim, n_output)
         )
 
-    def forward(self, obs):
-        return self.trunk(obs)
+    def forward(self, obs, detach=False):
+        h = self.trunk(obs)
+        if detach:
+            h = h.detach()
+
+        return h
+
+
+class VectorApproximator(nn.Module):
+    def __init__(self,
+                 input_shape,
+                 output_shape,
+                 encoder_feature_dim=50,
+                 num_layers=2,
+                 num_filters=32,
+                 hidden_dim=256,):
+        super().__init__()
+
+        n_output = output_shape[0]
+        n_input = input_shape[0]
+        self.encoder = MLP(n_input, encoder_feature_dim, hidden_dim)
+        self.encoder.feature_dim = encoder_feature_dim
+        self.Q = MLP(encoder_feature_dim, n_output, hidden_dim)
+        self.apply(weight_init)
+
+    def forward(self, obs, detach_encoder=False):
+        # detach_encoder allows to stop gradient propogation to encoder
+        z = self.encoder(obs, detach=detach_encoder)
+        q = self.Q(z)
+
+        return q
 
 
 class PixelApproximator(nn.Module):
@@ -57,10 +86,10 @@ class PixelApproximator(nn.Module):
         n_output = output_shape[0]
         self.encoder = PixelEncoder(input_shape, encoder_feature_dim,
                                     num_layers, num_filters)
-        self.Q = QFunction(self.encoder.feature_dim, n_output, hidden_dim)
+        self.Q = MLP(self.encoder.feature_dim, n_output, hidden_dim)
         self.apply(weight_init)
 
-    def forward(self, obs, action, detach_encoder=False):
+    def forward(self, obs, detach_encoder=False):
         # detach_encoder allows to stop gradient propogation to encoder
         z = self.encoder(obs, detach=detach_encoder)
         q = self.Q(z)

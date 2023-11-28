@@ -54,41 +54,24 @@ class PixelEncoder(nn.Module):
         self.fc = nn.Linear(num_filters * out_dim * out_dim, self.feature_dim)
         self.ln = nn.LayerNorm(self.feature_dim)
 
-        self.outputs = dict()
-
-    def reparameterize(self, mu, logstd):
-        std = torch.exp(logstd)
-        eps = torch.randn_like(std)
-        return mu + eps * std
-
     def forward_conv(self, obs):
-        # obs = obs / 255.
-        self.outputs['obs'] = obs
 
         conv = torch.relu(self.convs[0](obs))
-        self.outputs['conv1'] = conv
 
         for i in range(1, self.num_layers):
             conv = torch.relu(self.convs[i](conv))
-            self.outputs['conv%s' % (i + 1)] = conv
 
         h = conv.view(conv.size(0), -1)
         return h
 
     def forward(self, obs, detach=False):
         h = self.forward_conv(obs)
-
         if detach:
             h = h.detach()
 
         h_fc = self.fc(h)
-        self.outputs['fc'] = h_fc
-
         h_norm = self.ln(h_fc)
-        self.outputs['ln'] = h_norm
-
         out = torch.tanh(h_norm)
-        self.outputs['tanh'] = out
 
         return out
 
@@ -123,20 +106,13 @@ class PixelDecoder(nn.Module):
             )
         )
 
-        self.outputs = dict()
-
     def forward(self, h):
         h = torch.relu(self.fc(h))
-        self.outputs['fc'] = h
-
         deconv = h.view(-1, self.num_filters, self.out_dim, self.out_dim)
-        self.outputs['deconv1'] = deconv
 
         for i in range(0, self.num_layers - 1):
             deconv = torch.relu(self.deconvs[i](deconv))
-            self.outputs['deconv%s' % (i + 1)] = deconv
 
         obs = self.deconvs[-1](deconv)
-        self.outputs['obs'] = obs
 
         return obs
