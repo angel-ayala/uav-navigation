@@ -31,6 +31,14 @@ def load_json_dict(json_path):
     return json_dict
 
 
+def soft_update_params(net, target_net, tau):
+    # Soft update: target_network = tau * network + (1 - tau) * target_network
+    for param, target_param in zip(net.parameters(), target_net.parameters()):
+        target_param.data.copy_(
+            tau * param.data + (1 - tau) * target_param.data
+        )
+
+
 def do_step(agent, env, state, callback=None, must_update=False):
     # Choose action using the agent's policy
     action = agent.select_action(state)

@@ -9,6 +9,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from .utils import soft_update_params
 
 
 class ReplayBuffer:
@@ -70,20 +71,29 @@ class ReplayBuffer:
         return self.get_size()
 
 
-class DQNAgent:
+class DDQNAgent:
     BATCH_SIZE = 32
 
-    def __init__(self, state_space_shape, action_space_shape, approximator,
-                 device=None, learning_rate=0.0001, discount_factor=0.99,
-                 epsilon_start=1.0, epsilon_end=0.001, epsilon_decay=0.9999,
-                 buffer_capacity=2048, tau=0.001):
-        self.learning_rate = learning_rate
+    def __init__(self,
+                 state_space_shape,
+                 action_space_shape,
+                 device,
+                 approximator,
+                 approximator_lr=1e-3,
+                 approximator_beta=0.9,
+                 approximator_tau=0.005,
+                 discount_factor=0.99,
+                 epsilon_start=1.0,
+                 epsilon_end=0.01,
+                 epsilon_decay=0.9999,
+                 buffer_capacity=2048):
         self.discount_factor = discount_factor
         self.epsilon = epsilon_start
         self.epsilon_end = epsilon_end
         self.epsilon_decay = epsilon_decay
+
         self.action_space_size = action_space_shape[0]
-        self.tau = tau  # Soft update parameter
+        self.approximator_tau = approximator_tau  # Soft update parameter
         self.device = torch.device(device)
 
         # Q-networks
@@ -94,17 +104,18 @@ class DQNAgent:
         # Initialize target network with Q-network parameters
         self._update_target_network()
 
-        self.optimizer = optim.Adam(
-            self.q_network.parameters(), lr=learning_rate)
+        self.optimizer = optim.Adam(self.q_network.parameters(),
+                                    lr=approximator_lr,
+                                    betas=(approximator_beta, 0.999))
 
         # Replay Buffer
         self.memory = ReplayBuffer(buffer_capacity, state_space_shape,
                                    action_space_shape)
 
     def _update_target_network(self):
-        # Soft update: target_network = tau * Q-network + (1 - tau) * target_network
-        for target_param, param in zip(self.target_q_network.parameters(), self.q_network.parameters()):
-            target_param.data.copy_(self.tau * param.data + (1.0 - self.tau) * target_param.data)
+        soft_update_params(net=self.q_network,
+                           target_net=self.target_q_network,
+                           tau=self.approximator_tau)
 
     def select_action(self, state):
         # Choose action using epsilon-greedy policy
