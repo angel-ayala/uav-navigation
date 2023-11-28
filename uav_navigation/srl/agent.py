@@ -109,10 +109,7 @@ class AEDDQNAgent(DDQNAgent):
         self.encoder_optimizer.step()
         self.decoder_optimizer.step()
 
-    def update(self, state, action, reward, next_state, done):
-        # Store the transition in the replay buffer
-        self.memory.add(state, action, reward, next_state, done)
-
+    def update(self):
         # Update the Q-network if replay buffer is sufficiently large
         if len(self.memory) >= self.BATCH_SIZE:
             sampled_data = self.memory.sample(self.BATCH_SIZE,
@@ -123,8 +120,4 @@ class AEDDQNAgent(DDQNAgent):
         self.epsilon = max(self.epsilon * self.epsilon_decay, self.epsilon_end)
 
         # update the autoencoder
-        # best_iter = sampled_data[2].argmax()  # best reward value,
-        # obs_t = sampled_data[best_iter]
-        # obs_t1 = sampled_data[best_iter]
-        # self.update_decoder(obs_t, obs_t1)
         self.update_decoder(sampled_data[0], sampled_data[0])

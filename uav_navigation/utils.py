@@ -39,7 +39,8 @@ def soft_update_params(net, target_net, tau):
         )
 
 
-def do_step(agent, env, state, callback=None, must_update=False):
+def do_step(agent, env, state, callback=None, must_update=False,
+            must_remember=True):
     # Choose action using the agent's policy
     action = agent.select_action(state)
 
@@ -51,7 +52,10 @@ def do_step(agent, env, state, callback=None, must_update=False):
     # Update the agent based on the observed transition
     ended = done or trunc
     if must_update:
-        agent.update(state, action, reward, next_state, ended)
+        agent.update()
+    if must_remember:
+        # Store the transition in the replay buffer if must
+        agent.memory.add(state, action, reward, next_state, ended)
 
     return action, reward, next_state, ended
 
@@ -70,7 +74,8 @@ def eval_agent(agent, env, eval_epsilon, step_callback=None):
 
     while not end:
         action, reward, next_state, end = do_step(
-            agent, env, state, step_callback, must_update=False)
+            agent, env, state, step_callback, must_update=False,
+            must_remember=False)
         state = next_state
         ep_steps += 1
         ep_reward += reward
@@ -88,8 +93,8 @@ def fill_memory(agent, env, num_steps, step_callback=None):
     print('Initializing memory...')
     for step in tqdm(range(num_steps)):
         action, reward, next_state, ended = do_step(
-            agent, env, state, step_callback, must_update=False)
-        agent.memory.add(state, action, reward, next_state, ended)
+            agent, env, state, step_callback, must_update=False,
+            must_remember=True)
         state = next_state
         if ended:
             state, info = env.reset()
@@ -111,7 +116,8 @@ def train_agent(agent, env, num_steps, update_freq, step_callback=None):
     for step in range(num_steps):
         action, reward, next_state, ended = do_step(
             agent, env, state, step_callback,
-            must_update=step % update_freq == 0)
+            must_update=step % update_freq == 0,
+            must_remember=True)
 
         ep_reward += reward
         state = next_state

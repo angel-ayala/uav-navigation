@@ -45,15 +45,20 @@ env = PreprocessObservation(env, is_pixels=is_pixels)
 # Agent args
 agent_params = dict(state_space_shape=env.observation_space.shape,
                     action_space_shape=(env.action_space.n, ),
-                    approximator=QFeaturesNetwork,
                     device='cuda' if torch.cuda.is_available() else 'cpu',
-                    learning_rate=0.0001,
+                    approximator=QFeaturesNetwork,
+                    approximator_lr=1e-4,
+                    approximator_beta=0.9,
+                    approximator_tau=0.001,
                     discount_factor=0.99,
-                    epsilon_start=0.5,
+                    epsilon_start=1.0,
                     epsilon_end=0.01,
                     epsilon_decay=0.9999,
                     buffer_capacity=2048,
-                    tau=0.001)
+                    latent_dim=256,
+                    hidden_dim=1024,
+                    num_layers=2,
+                    num_filters=32)
 print(agent_params['state_space_shape'])
 print(agent_params['action_space_shape'])
 
@@ -71,7 +76,9 @@ store_callback = StoreStepData(folder_name / 'history.csv')
 train_eval_params = dict(training_steps=1000000,
                          save_steps=10000,
                          mem_steps=2048,
-                         eval_epsilon=0.01,)
+                         eval_epsilon=0.01,
+                         update_freq=4,
+                         outpath=folder_name)
 
 
 save_dict_json(env_params, folder_name / 'args_environment.json')

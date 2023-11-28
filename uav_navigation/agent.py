@@ -90,7 +90,7 @@ class DDQNAgent:
                  latent_dim=256,
                  hidden_dim=1024,
                  num_layers=2,
-                 num_filters=23):
+                 num_filters=32):
         self.discount_factor = discount_factor
         self.epsilon = epsilon_start
         self.epsilon_end = epsilon_end
@@ -140,10 +140,7 @@ class DDQNAgent:
                 q_values = self.q_network(state_tensor).cpu().numpy()
             return np.argmax(q_values)  # Exploit
 
-    def update(self, state, action, reward, next_state, done):
-        # Store the transition in the replay buffer
-        self.memory.add(state, action, reward, next_state, done)
-
+    def update(self):
         # Update the Q-network if replay buffer is sufficiently large
         if len(self.memory) >= self.BATCH_SIZE:
             sampled_data = self.memory.sample(self.BATCH_SIZE, device=self.device)
