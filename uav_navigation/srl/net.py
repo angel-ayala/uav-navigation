@@ -54,8 +54,7 @@ class VectorApproximator(nn.Module):
                  output_shape,
                  encoder_feature_dim=50,
                  num_layers=2,
-                 num_filters=32,
-                 hidden_dim=256,):
+                 hidden_dim=256, **kwargs):
         super().__init__()
 
         n_output = output_shape[0]

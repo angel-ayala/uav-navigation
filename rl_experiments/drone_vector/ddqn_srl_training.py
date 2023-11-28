@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Tue Nov 14 20:33:17 2023
+Created on Mon Nov 27 23:45:58 2023
 
 @author: Angel Ayala
 """
@@ -13,7 +13,7 @@ import gym
 import datetime
 from pathlib import Path
 from uav_navigation.srl.agent import AEDDQNAgent
-from uav_navigation.srl.net import PixelApproximator
+from uav_navigation.srl.net import VectorApproximator
 from uav_navigation.utils import save_dict_json
 from uav_navigation.utils import train_eval_agent
 from uav_navigation.utils import PreprocessObservation
@@ -29,7 +29,7 @@ np.random.seed(seed_val)
 
 # Environment args
 environment_name = 'webots_drone:webots_drone/DroneEnvDiscrete-v0'
-is_pixels = True
+is_pixels = False
 env_params = dict(time_limit_seconds=60,  # 1 min
                   max_no_action_seconds=5,  # 5 sec
                   frame_skip=25,  # 200ms
@@ -47,8 +47,8 @@ env = PreprocessObservation(env, is_pixels=is_pixels)
 agent_params = dict(
     state_space_shape=env.observation_space.shape,
     action_space_shape=(env.action_space.n, ),
-    device='cuda' if torch.cuda.is_available() else 'cpu',
-    approximator=PixelApproximator,
+    device='cpu',
+    approximator=VectorApproximator,
     approximator_lr=1e-3,
     approximator_beta=0.9,
     approximator_tau=0.005,

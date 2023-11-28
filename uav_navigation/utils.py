@@ -98,7 +98,7 @@ def fill_memory(agent, env, num_steps, step_callback=None):
     agent.epsilon = copy.copy(curr_epsilon)
 
 
-def train_agent(agent, env, num_steps, step_callback=None):
+def train_agent(agent, env, num_steps, update_freq, step_callback=None):
     state, info = env.reset()
     total_reward = 0
     total_episodes = 0
@@ -110,7 +110,8 @@ def train_agent(agent, env, num_steps, step_callback=None):
 
     for step in range(num_steps):
         action, reward, next_state, ended = do_step(
-            agent, env, state, step_callback, must_update=True)
+            agent, env, state, step_callback,
+            must_update=step % update_freq == 0)
 
         ep_reward += reward
         state = next_state
@@ -132,13 +133,13 @@ def train_agent(agent, env, num_steps, step_callback=None):
 
 
 def train_eval_agent(agent, env, training_steps, save_steps, mem_steps,
-                     eval_epsilon, outpath, step_callback=None):
+                     eval_epsilon, update_freq, outpath, step_callback=None):
     max_ep_steps = training_steps // save_steps
     fill_memory(agent, env, mem_steps, step_callback)
     for e in range(max_ep_steps):
         print('Starting ep', e)
         accum_reward, n_episodes = train_agent(agent, env, save_steps,
-                                               step_callback)
+                                               update_freq, step_callback)
         agent.save(outpath / f"agent_ep_{e:03d}.pth")
         eval_reward, eval_steps = eval_agent(agent, env, eval_epsilon,
                                              step_callback)

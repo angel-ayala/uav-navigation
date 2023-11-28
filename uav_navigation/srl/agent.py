@@ -13,6 +13,8 @@ import torch.nn.functional as F
 from uav_navigation.agent import DDQNAgent
 from .net import weight_init
 from .net import MLP
+from .net import VectorApproximator
+from .net import PixelApproximator
 from .autoencoder import PixelDecoder
 from .autoencoder import preprocess_obs
 
@@ -31,35 +33,44 @@ class AEDDQNAgent(DDQNAgent):
                  epsilon_end=0.01,
                  epsilon_decay=0.9999,
                  buffer_capacity=2048,
+                 latent_dim=256,
+                 hidden_dim=1024,
+                 num_layers=2,
+                 num_filters=32,
                  encoder_lr=1e-3,
-                 decoder=None,
                  decoder_lr=1e-3,
                  decoder_latent_lambda=1e-6,
-                 decoder_weight_lambda=1e-7,
-                 hidden_dim=256):
+                 decoder_weight_lambda=1e-7):
 
         super(AEDDQNAgent, self).__init__(
             state_space_shape=state_space_shape,
             action_space_shape=action_space_shape,
             device=device,
             approximator=approximator,
-            approximator_lr=1e-3,
-            approximator_beta=0.9,
-            approximator_tau=0.005,
-            discount_factor=0.99,
-            epsilon_start=1.0,
-            epsilon_end=0.01,
-            epsilon_decay=0.9999,
-            buffer_capacity=2048)
+            approximator_lr=approximator_lr,
+            approximator_beta=approximator_beta,
+            approximator_tau=approximator_tau,
+            discount_factor=discount_factor,
+            epsilon_start=epsilon_start,
+            epsilon_end=epsilon_end,
+            epsilon_decay=epsilon_decay,
+            buffer_capacity=buffer_capacity,
+            latent_dim=latent_dim,
+            hidden_dim=hidden_dim,
+            num_layers=num_layers,
+            num_filters=num_filters)
 
         self.encoder = self.q_network.encoder
-        if decoder is None:
-            self.decoder = MLP(self.q_network.encoder.feature_dim,
-                               state_space_shape[0], hidden_dim)
-        if decoder is 'pixel':
+
+        if type(approximator) == VectorApproximator:
+            self.decoder = MLP(self.encoder.feature_dim,
+                               state_space_shape[0], latent_dim)
+        if type(approximator) == PixelApproximator:
             self.decoder = PixelDecoder(state_space_shape,
                                         self.encoder.feature_dim,
-                                        self.encoder.num_layers).to(self.device)
+                                        num_layers=num_layers,
+                                        num_filters=num_filters
+                                        ).to(self.device)
         if self.decoder is None:
             raise 'Error, no decoder indicated.'
         self.decoder_latent_lambda = decoder_latent_lambda
@@ -104,11 +115,16 @@ class AEDDQNAgent(DDQNAgent):
 
         # Update the Q-network if replay buffer is sufficiently large
         if len(self.memory) >= self.BATCH_SIZE:
-            self._update_q_network()
+            sampled_data = self.memory.sample(self.BATCH_SIZE,
+                                              device=self.device)
+            self._update_q_network(sampled_data)
 
         # Anneal exploration rate
         self.epsilon = max(self.epsilon * self.epsilon_decay, self.epsilon_end)
-        
+
         # update the autoencoder
-        sampled_data = self.memory.sample(self.BATCH_SIZE, device=self.device)
+        # best_iter = sampled_data[2].argmax()  # best reward value,
+        # obs_t = sampled_data[best_iter]
+        # obs_t1 = sampled_data[best_iter]
+        # self.update_decoder(obs_t, obs_t1)
         self.update_decoder(sampled_data[0], sampled_data[0])
