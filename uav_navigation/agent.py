@@ -135,7 +135,7 @@ class DDQNAgent:
             return np.random.randint(self.action_space_size)  # Explore
         else:
             state_tensor = torch.tensor(
-                state, dtype=torch.float32).unsqueeze(0)
+                state, dtype=torch.float32, to=self.device).unsqueeze(0)
             with torch.no_grad():
                 q_values = self.q_network(state_tensor).cpu().numpy()
             return np.argmax(q_values)  # Exploit

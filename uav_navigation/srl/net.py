@@ -36,7 +36,6 @@ class MLP(nn.Module):
         super().__init__()
 
         self.num_layers = num_layers
-        print(hidden_dim, num_layers, n_input, n_output)
         self.h_layers = nn.ModuleList([nn.Linear(n_input, hidden_dim)])
         for i in range(num_layers - 1):
             self.h_layers.append(nn.Linear(hidden_dim, hidden_dim))
