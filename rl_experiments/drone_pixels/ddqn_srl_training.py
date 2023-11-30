@@ -15,7 +15,7 @@ from pathlib import Path
 from uav_navigation.srl.agent import AEDDQNAgent
 from uav_navigation.srl.net import PixelApproximator
 from uav_navigation.utils import save_dict_json
-from uav_navigation.utils import train_eval_agent
+from uav_navigation.utils import run_agent
 from uav_navigation.utils import PreprocessObservation
 
 
@@ -79,17 +79,16 @@ folder_name.mkdir(parents=True)
 store_callback = StoreStepData(folder_name / 'history.csv')
 
 # RL training
-train_eval_params = dict(training_steps=1000000,
-                         save_steps=10000,
-                         mem_steps=2048,
-                         eval_epsilon=0.01,
-                         update_freq=4,
-                         outpath=folder_name)
+run_params = dict(training_steps=1000000,
+                  target_update_steps=4,
+                  mem_steps=2048,
+                  eval_interval=10000,
+                  eval_epsilon=0.01,
+                  outpath=folder_name)
 
 
 save_dict_json(env_params, folder_name / 'args_environment.json')
 save_dict_json(agent_params, folder_name / 'args_agent.json')
-save_dict_json(train_eval_params, folder_name / 'args_training.json')
+save_dict_json(run_params, folder_name / 'args_training.json')
 
-train_eval_agent(agent, env, step_callback=store_callback,
-                 **train_eval_params)
+run_agent(agent, env, step_callback=store_callback, **run_params)

@@ -9,6 +9,7 @@ import json
 import gym
 import copy
 import numpy as np
+import time
 from tqdm import tqdm
 
 from webots_drone.utils import min_max_norm
@@ -60,95 +61,96 @@ def do_step(agent, env, state, callback=None, must_update=False,
     return action, reward, next_state, ended
 
 
-def eval_agent(agent, env, eval_epsilon, step_callback=None):
+def run_agent(agent, env, training_steps, target_update_steps, mem_steps,
+              eval_interval, eval_epsilon, outpath, step_callback=None):
+    ended = True
+    total_reward = 0
+    total_episodes = 0
+    ep_reward = 0
+    ep_steps = 0
+    last_max_r = float('-inf')
+    timemark = time.time()
+
+    if mem_steps:
+        membar = tqdm(range(mem_steps), desc='Memory init', leave=False)
+        for step in membar:
+            if ended:
+                state, info = env.reset()
+                if step_callback:
+                    step_callback.set_init_state(state, info)
+            action, reward, next_state, ended = do_step(
+                agent, env, state, step_callback,
+                must_update=False, must_remember=True)
+            state = next_state
+        elapsed_time = time.time() - timemark
+        print(f"Memory fill at {elapsed_time:.4f} seconds")
+        membar.clear()
+        
+    tbar = tqdm(range(eval_interval), desc='Episode 0', leave=False,
+                unit='step', bar_format='{desc}{n:04d}|{bar}|[{rate_fmt}]')
+    for step in range(training_steps):
+        # after training steps, began evaluation
+        if step % eval_interval == 0:
+            elapsed_time = time.time() - timemark
+            tbar.clear()
+            print(f"Episode {total_episodes:03d}: {elapsed_time:.4f} seconds", end=' - ')
+            timemark = time.time()
+            eval_reward, eval_steps = evaluate_agent(
+                agent, env, eval_epsilon, step_callback)
+            if last_max_r <= eval_reward:
+                agent.save(outpath / f"agent_ep_{total_episodes:03d}.pth")
+                last_max_r = eval_reward
+            total_episodes += 1
+            total_reward += ep_reward
+            tbar.reset()
+            tbar.set_description(f"Episode {total_episodes:03d}")
+            ended = True
+            timemark = time.time()
+
+        if ended:
+            ep_reward = 0
+            ep_steps = 0
+            state, info = env.reset()
+            if step_callback:
+                step_callback.set_init_state(state, info)
+        action, reward, next_state, ended = do_step(
+            agent, env, state, step_callback,
+            must_update=step % target_update_steps == 0,
+            must_remember=True)
+
+        ep_reward += reward
+        state = next_state
+        ep_steps += 1
+        tbar.update(1)
+
+    return total_reward, total_episodes
+
+
+def evaluate_agent(agent, env, eval_epsilon, step_callback=None):
     state, info = env.reset()
     ep_reward = 0
     ep_steps = 0
     end = False
-    curr_epsilon = copy.copy(agent.epsilon)
-    agent.epsilon = copy.copy(eval_epsilon)
+    curr_epsilon = agent.epsilon
+    agent.epsilon = eval_epsilon
 
     if step_callback:
         step_callback.set_init_state(state, info)
         step_callback.set_eval()
 
+    timemark = time.time()
     while not end:
         action, reward, next_state, end = do_step(
-            agent, env, state, step_callback, must_update=False,
-            must_remember=False)
-        state = next_state
-        ep_steps += 1
-        ep_reward += reward
-    print("Evaluation ends:",
-          f"\tlength: {ep_steps} steps\tr: {ep_reward}\te: {agent.epsilon}")
-    agent.epsilon = copy.copy(curr_epsilon)
-    return ep_reward, ep_steps
-
-
-def fill_memory(agent, env, num_steps, step_callback=None):
-    state, info = env.reset()
-    curr_epsilon = copy.copy(agent.epsilon)
-    if step_callback:
-        step_callback.set_init_state(state, info)
-    print('Initializing memory...')
-    for step in tqdm(range(num_steps)):
-        action, reward, next_state, ended = do_step(
-            agent, env, state, step_callback, must_update=False,
-            must_remember=True)
-        state = next_state
-        if ended:
-            state, info = env.reset()
-            if step_callback:
-                step_callback.set_init_state(state, info)
-    agent.epsilon = copy.copy(curr_epsilon)
-
-
-def train_agent(agent, env, num_steps, update_freq, step_callback=None):
-    state, info = env.reset()
-    total_reward = 0
-    total_episodes = 0
-    ep_reward = 0
-    ep_steps = 0
-    if step_callback:
-        step_callback.set_init_state(state, info)
-        step_callback.set_learning()
-
-    for step in range(num_steps):
-        action, reward, next_state, ended = do_step(
             agent, env, state, step_callback,
-            must_update=step % update_freq == 0,
-            must_remember=True)
-
-        ep_reward += reward
+            must_update=False, must_remember=False)
         state = next_state
         ep_steps += 1
+        ep_reward += reward
 
-        if ended:
-            total_episodes += 1
-            total_reward += ep_reward
-            print(
-                f"Iterarion {total_episodes},\ts:{ep_steps}\tr: {ep_reward}",
-                'e:', agent.epsilon)
-            ep_reward = 0
-            # ep_steps = 0
-            state, info = env.reset()
-            if step_callback:
-                step_callback.set_init_state(state, info)
-
-    return total_reward, total_episodes
-
-
-def train_eval_agent(agent, env, training_steps, save_steps, mem_steps,
-                     eval_epsilon, update_freq, outpath, step_callback=None):
-    max_ep_steps = training_steps // save_steps
-    fill_memory(agent, env, mem_steps, step_callback)
-    for e in range(max_ep_steps):
-        print('Starting ep', e)
-        accum_reward, n_episodes = train_agent(agent, env, save_steps,
-                                               update_freq, step_callback)
-        agent.save(outpath / f"agent_ep_{e:03d}.pth")
-        eval_reward, eval_steps = eval_agent(agent, env, eval_epsilon,
-                                             step_callback)
+    elapsed_time = time.time() - timemark
+    print(f"Evaluation phase, {elapsed_time:.4f} seconds\t R: {ep_reward}\tS: {ep_steps}")
+    agent.epsilon = curr_epsilon
+    return ep_reward, ep_steps
 
 
 class PreprocessObservation(gym.core.Wrapper):
