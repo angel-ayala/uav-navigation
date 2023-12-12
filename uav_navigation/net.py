@@ -19,6 +19,7 @@ class QNetwork(nn.Module):
         self.fc3 = nn.Linear(64, 512)
         self.out = nn.Linear(512, action_size)
         self.drop = nn.Dropout1d(p=0.05)
+        self.leaky_relu = nn.LeakyReLU()
 
     def forward(self, x):
         x = self.leaky_relu(self.fc1(x))
