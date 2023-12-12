@@ -86,15 +86,14 @@ def run_evaluation(seed_val, log_path, episode):
                    agent_params['action_space_shape'])
 
     training_params = load_json_dict(log_path / 'args_training.json')
-    if episode > 0:
-        agents_path = [agents_path[episode]]
-
-    for episode, agent_path in enumerate(agents_path):
+    for log_ep, agent_path in enumerate(agents_path):
+        if episode > 0 and log_ep != episode:
+            continue
         print('Loading from', agent_path)
         agent = agent_class(**agent_params)
         agent.load(agent_path)
         store_callback = StoreStepData(
-            log_path / f"history_eval_{episode:03d}.csv")
+            log_path / f"history_eval_{log_ep:03d}.csv")
         evaluate_agent(agent, env, training_params['eval_epsilon'],
                        step_callback=store_callback)
 
