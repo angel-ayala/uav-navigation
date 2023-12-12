@@ -78,7 +78,6 @@ def run_agent(agent, env, training_steps, target_update_steps, mem_steps,
     total_episodes = 0
     ep_reward = 0
     ep_steps = 0
-    last_max_r = float('-inf')
     timemark = time.time()
 
     if mem_steps:
@@ -104,11 +103,9 @@ def run_agent(agent, env, training_steps, target_update_steps, mem_steps,
             elapsed_time = time.time() - timemark
             tbar.clear()
             print(f"Episode {total_episodes:03d}: {elapsed_time:.4f} seconds", end=' - ')
+            agent.save(outpath / f"agent_ep_{total_episodes:03d}.pth")
             eval_reward, eval_steps, eval_time = evaluate_agent(
                 agent, env, eval_epsilon, step_callback)
-            if last_max_r <= eval_reward:
-                agent.save(outpath / f"agent_ep_{total_episodes:03d}.pth")
-                last_max_r = eval_reward
             total_episodes += 1
             total_reward += ep_reward
             tbar.reset()
