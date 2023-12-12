@@ -20,6 +20,7 @@ from uav_navigation.srl.net import PixelApproximator
 from uav_navigation.agent import DDQNAgent
 from uav_navigation.agent import profile_agent
 from uav_navigation.net import QFeaturesNetwork
+from uav_navigation.net import QNetwork
 
 from uav_navigation.utils import load_json_dict
 from uav_navigation.utils import evaluate_agent
@@ -70,6 +71,10 @@ def run_evaluation(seed_val, log_path, episode):
         agent_profiler = profile_agent_srl
     elif 'QFeaturesNetwork' in agent_params['approximator']:
         agent_params['approximator'] = QFeaturesNetwork
+        agent_class = DDQNAgent
+        agent_profiler = profile_agent
+    elif 'QNetwork' in agent_params['approximator']:
+        agent_params['approximator'] = QNetwork
         agent_class = DDQNAgent
         agent_profiler = profile_agent
     print('state_space_shape', agent_params['state_space_shape'])
