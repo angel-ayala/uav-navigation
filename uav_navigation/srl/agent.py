@@ -12,7 +12,6 @@ from torch import optim
 import torch.nn.functional as F
 from thop import clever_format
 from uav_navigation.agent import DDQNAgent
-from uav_navigation.agent import profile_agent as dqn_profile
 from uav_navigation.utils import profile_model
 from .net import weight_init
 from .net import MLP
@@ -26,18 +25,21 @@ def profile_agent(agent, state_space_shape, action_space_shape):
     total_flops, total_params = 0, 0
     encoder = agent.encoder
     decoder = agent.decoder
-    # profile q-network
-    flops, params = dqn_profile(agent, state_space_shape, action_space_shape)
-    total_flops += flops
-    total_params += params
     # profile encode stage
-    flops, params = profile_model(encoder, state_space_shape)
+    flops, params = profile_model(encoder, state_space_shape, agent.device)
     total_flops += flops
     total_params += params
     print('Encoder: {} flops, {} params'.format(
         *clever_format([flops, params], "%.3f")))
+    # profile q-network
+    flops, params = profile_model(agent.q_network.Q, encoder.feature_dim,
+                                  agent.device)
+    total_flops += flops
+    total_params += params
+    print('QFunction: {} flops, {} params'.format(
+        *clever_format([flops, params], "%.3f")))
     # profile decode stage
-    flops, params = profile_model(decoder, encoder.feature_dim)
+    flops, params = profile_model(decoder, encoder.feature_dim, agent.device)
     total_flops += flops
     total_params += params
     print('Decoder: {} flops, {} params'.format(

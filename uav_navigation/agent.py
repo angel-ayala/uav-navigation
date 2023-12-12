@@ -16,10 +16,12 @@ from .utils import profile_model
 
 def profile_agent(agent, state_space_shape, action_space_shape):
     # profile q-network
-    flops, params = profile_model(agent.q_network, state_space_shape)
+    flops, params = profile_model(agent.q_network, state_space_shape,
+                                  agent.device)
     print('Q-network: {} flops, {} params'.format(
         *clever_format([flops, params], "%.3f")))
-    flops, params = profile_model(agent.target_q_network, state_space_shape)
+    flops, params = profile_model(agent.target_q_network, state_space_shape,
+                                  agent.device)
     print('Target Q-network: {} flops, {} params'.format(
         *clever_format([flops, params], "%.3f")))
     return flops, params
