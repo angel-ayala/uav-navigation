@@ -70,7 +70,7 @@ class AEDDQNAgent(DDQNAgent):
                  encoder_lr=1e-3,
                  decoder_lr=1e-3,
                  decoder_latent_lambda=1e-6,
-                 decoder_weight_lambda=1e-7):
+                 decoder_weight_decay=1e-7):
 
         super(AEDDQNAgent, self).__init__(
             state_space_shape=state_space_shape,
@@ -84,14 +84,33 @@ class AEDDQNAgent(DDQNAgent):
             epsilon_start=epsilon_start,
             epsilon_end=epsilon_end,
             epsilon_decay=epsilon_decay,
-            buffer_capacity=buffer_capacity,
-            latent_dim=latent_dim,
-            hidden_dim=hidden_dim,
+            buffer_capacity=buffer_capacity)
+
+        # Re initialize Q-networks with proper parameters
+        del self.q_network
+        del self.target_q_network
+        del self.optimizer
+        appx_params = dict(
+            input_shape=state_space_shape,
+            output_shape=action_space_shape,
             num_layers=num_layers,
-            num_filters=num_filters)
+            hidden_dim=hidden_dim,
+            feature_dim=latent_dim)
+        if approximator == PixelApproximator:
+            appx_params['num_filters'] = num_filters
+
+        self.q_network = approximator(**appx_params).to(self.device)
+        self.target_q_network = approximator(**appx_params).to(self.device)
 
         self.encoder = self.q_network.encoder
+        self.encoder.apply(weight_init)
         self.encoder.to(self.device)
+
+        # Initialize target network with Q-network parameters
+        self._update_target_network()
+        self.optimizer = optim.Adam(self.q_network.parameters(),
+                                    lr=approximator_lr,
+                                    betas=(approximator_beta, 0.999))
 
         if approximator == VectorApproximator:
             self.decoder = MLP(self.encoder.feature_dim,
@@ -106,7 +125,6 @@ class AEDDQNAgent(DDQNAgent):
             raise ValueError(f"Error, no decoder for {type(approximator)}.")
         self.decoder_latent_lambda = decoder_latent_lambda
         self.decoder.apply(weight_init)
-
         # optimizer for critic encoder for reconstruction loss
         self.encoder_optimizer = optim.Adam(
             self.encoder.parameters(), lr=encoder_lr
@@ -116,7 +134,7 @@ class AEDDQNAgent(DDQNAgent):
         self.decoder_optimizer = optim.Adam(
             self.decoder.parameters(),
             lr=decoder_lr,
-            weight_decay=decoder_weight_lambda
+            weight_decay=decoder_weight_decay
         )
 
     def update_decoder(self, obs, target_obs):
@@ -146,9 +164,8 @@ class AEDDQNAgent(DDQNAgent):
             sampled_data = self.memory.sample(self.BATCH_SIZE,
                                               device=self.device)
             self._update_q_network(sampled_data)
+            # update the autoencoder
+            self.update_decoder(sampled_data[0], sampled_data[0])
 
         # Anneal exploration rate
         self.epsilon = max(self.epsilon * self.epsilon_decay, self.epsilon_end)
-
-        # update the autoencoder
-        self.update_decoder(sampled_data[0], sampled_data[0])

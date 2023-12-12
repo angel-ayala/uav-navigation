@@ -176,4 +176,4 @@ dmypy.json
 cython_debug/
 
 # project folders
-logs/
+logs*

@@ -24,6 +24,7 @@ def profile_model(model, input_shape, device):
                             inputs=(x, ),)
     return flops, params
 
+
 def save_dict_json(dict2save, json_path):
     proc_dic = dict2save.copy()
     dict_json = json.dumps(proc_dic,
@@ -147,7 +148,6 @@ def evaluate_agent(agent, env, eval_epsilon, step_callback=None):
         step_callback.set_eval()
 
     timemark = time.time()
-    print(f"[{timemark:.4f}] Evaluation initiated.")
     while not end:
         action, reward, next_state, end = do_step(
             agent, env, state, step_callback,
@@ -159,12 +159,12 @@ def evaluate_agent(agent, env, eval_epsilon, step_callback=None):
         sys.stdout.flush()
 
     elapsed_time = time.time() - timemark
-    print(f"\rTotal time: {elapsed_time:.4f} seconds\t R: {ep_reward}\tS: {ep_steps}")
+    print(f"\rEvaluation: {elapsed_time:.4f} seconds\tR: {ep_reward}\tS: {ep_steps}")
     agent.epsilon = curr_epsilon
     return ep_reward, ep_steps, elapsed_time
 
 
-class PreprocessObservation(gym.core.Wrapper):
+class PreprocessObservation(gym.Wrapper):
     def __init__(self, env: gym.Env, is_pixels=True):
         super().__init__(env)
         if is_pixels:

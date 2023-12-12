@@ -16,7 +16,8 @@ from uav_navigation.srl.autoencoder import PixelEncoder
 
 def weight_init(m):
     """Custom weight init for Conv2D and Linear layers."""
-    if isinstance(m, nn.Linear):
+    # if isinstance(m, nn.Linear):
+    if type(m) == nn.Linear:
         nn.init.orthogonal_(m.weight.data)
         m.bias.data.fill_(0.0)
     elif isinstance(m, nn.Conv2d) or isinstance(m, nn.ConvTranspose2d):
@@ -29,12 +30,13 @@ def weight_init(m):
         nn.init.orthogonal_(m.weight.data[:, :, mid, mid], gain)
 
 
-class MLP(nn.Module):       
+class MLP(nn.Module):
     """MLP for q-function."""
 
-    def __init__(self, n_input, n_output, hidden_dim, num_layers=2, **kwargs):
+    def __init__(self, n_input, n_output, hidden_dim, num_layers=2):
         super().__init__()
 
+        self.feature_dim = n_output
         self.num_layers = num_layers
         self.h_layers = nn.ModuleList([nn.Linear(n_input, hidden_dim)])
         for i in range(num_layers - 1):
@@ -51,59 +53,22 @@ class MLP(nn.Module):
 
         return h
 
-class QFunction(nn.Module):
-    def __init__(self, obs_dim, action_dim, hidden_dim):
-        super().__init__()
-
-        self.trunk = nn.Sequential(
-            nn.Linear(obs_dim, hidden_dim), nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
-            nn.Linear(hidden_dim, action_dim)
-        )
-    
-    def forward(self, obs, detach=False):
-        h = self.trunk(obs)
-        if detach:
-            h = h.detach()
-        return h
-
-
-class QApproximator(nn.Module):
-    def __init__(self,
-                 input_shape,
-                 output_shape,
-                 num_layers=2,
-                 hidden_dim=256, **kwargs):
-        super().__init__()
-        self.Q = MLP(input_shape[0], output_shape[0], hidden_dim=hidden_dim,
-                     num_layers=num_layers)
-        self.apply(weight_init)
-
-    def forward(self, obs, detach_encoder=False):
-        # detach_encoder allows to stop gradient propogation to encoder
-        q = self.Q(obs)
-
-        return q
-
 
 class VectorApproximator(nn.Module):
     def __init__(self,
                  input_shape,
                  output_shape,
-                 encoder_feature_dim=50,
                  num_layers=2,
-                 hidden_dim=256, **kwargs):
+                 hidden_dim=256,
+                 feature_dim=50):
         super().__init__()
 
         n_output = output_shape[0]
         n_input = input_shape[0]
-        # self.encoder = MLP(n_input, encoder_feature_dim, hidden_dim,
-        self.encoder = QFunction(n_input, encoder_feature_dim, hidden_dim)
-        self.encoder.feature_dim = encoder_feature_dim
-        self.Q = QFunction(encoder_feature_dim, n_output, hidden_dim)
-        # self.encoder = MLP(encoder_feature_dim, n_output, hidden_dim,
-                     # num_layers=num_layers)
-        self.apply(weight_init)
+        self.encoder = MLP(n_input, feature_dim, hidden_dim,
+                           num_layers=num_layers)
+        self.Q = MLP(feature_dim, n_output, hidden_dim,
+                     num_layers=num_layers)
 
     def forward(self, obs, detach_encoder=False):
         # detach_encoder allows to stop gradient propogation to encoder
@@ -117,17 +82,16 @@ class PixelApproximator(nn.Module):
     def __init__(self,
                  input_shape,
                  output_shape,
-                 encoder_feature_dim=50,
                  num_layers=2,
-                 num_filters=32,
-                 hidden_dim=256,):
+                 hidden_dim=256,
+                 feature_dim=50,
+                 num_filters=32):
         super().__init__()
 
         n_output = output_shape[0]
-        self.encoder = PixelEncoder(input_shape, encoder_feature_dim,
+        self.encoder = PixelEncoder(input_shape, feature_dim,
                                     num_layers, num_filters)
         self.Q = MLP(self.encoder.feature_dim, n_output, hidden_dim)
-        self.apply(weight_init)
 
     def forward(self, obs, detach_encoder=False):
         # detach_encoder allows to stop gradient propogation to encoder

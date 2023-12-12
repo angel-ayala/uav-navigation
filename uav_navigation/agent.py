@@ -101,11 +101,7 @@ class DDQNAgent:
                  epsilon_start=1.0,
                  epsilon_end=0.01,
                  epsilon_decay=0.9999,
-                 buffer_capacity=2048,
-                 latent_dim=256,
-                 hidden_dim=1024,
-                 num_layers=2,
-                 num_filters=32):
+                 buffer_capacity=2048):
         self.discount_factor = discount_factor
         self.epsilon = epsilon_start
         self.epsilon_end = epsilon_end
@@ -117,17 +113,9 @@ class DDQNAgent:
 
         # Q-networks
         self.q_network = approximator(
-            state_space_shape, action_space_shape,
-            encoder_feature_dim=latent_dim,
-            hidden_dim=hidden_dim,
-            num_layers=num_layers,
-            num_filters=num_filters).to(self.device)
+            state_space_shape, action_space_shape).to(self.device)
         self.target_q_network = approximator(
-            state_space_shape, action_space_shape,
-            encoder_feature_dim=latent_dim,
-            hidden_dim=hidden_dim,
-            num_layers=num_layers,
-            num_filters=num_filters).to(self.device)
+            state_space_shape, action_space_shape).to(self.device)
         # Initialize target network with Q-network parameters
         self._update_target_network()
 
