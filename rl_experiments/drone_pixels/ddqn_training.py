@@ -12,7 +12,7 @@ import numpy as np
 import gym
 import datetime
 from pathlib import Path
-from uav_navigation.agent import DQNAgent
+from uav_navigation.agent import DDQNAgent
 from uav_navigation.net import QFeaturesNetwork
 from uav_navigation.utils import save_dict_json
 from uav_navigation.utils import run_agent
@@ -47,22 +47,22 @@ agent_params = dict(state_space_shape=env.observation_space.shape,
                     action_space_shape=(env.action_space.n, ),
                     device='cuda' if torch.cuda.is_available() else 'cpu',
                     approximator=QFeaturesNetwork,
-                    approximator_lr=1e-4,
+                    approximator_lr=1e-3,
                     approximator_beta=0.9,
                     approximator_tau=0.001,
                     discount_factor=0.99,
                     epsilon_start=1.0,
                     epsilon_end=0.01,
-                    epsilon_decay=0.9999,
+                    epsilon_decay=0.999,
                     buffer_capacity=2048,
-                    latent_dim=256,
+                    latent_dim=512,
                     hidden_dim=1024,
                     num_layers=2,
                     num_filters=32)
 print(agent_params['state_space_shape'])
 print(agent_params['action_space_shape'])
 
-agent = DQNAgent(**agent_params)
+agent = DDQNAgent(**agent_params)
 
 # Summary folder
 folder_name = './logs/ddqn_' + datetime.datetime.now(

@@ -12,7 +12,7 @@ import numpy as np
 import gym
 import datetime
 from pathlib import Path
-from uav_navigation.agent import DQNAgent
+from uav_navigation.agent import DDQNAgent
 from uav_navigation.net import QNetwork
 from uav_navigation.utils import save_dict_json
 from uav_navigation.utils import run_agent
@@ -45,19 +45,24 @@ env = PreprocessObservation(env, is_pixels=is_pixels)
 # Agent args
 agent_params = dict(state_space_shape=env.observation_space.shape,
                     action_space_shape=(env.action_space.n, ),
-                    approximator=QNetwork,
                     device='cpu',
-                    learning_rate=0.0001,
+                    approximator=QNetwork,
+                    approximator_lr=1e-3,
+                    approximator_beta=0.9,
+                    approximator_tau=0.001,
                     discount_factor=0.99,
-                    epsilon_start=0.5,
+                    epsilon_start=1.0,
                     epsilon_end=0.01,
-                    epsilon_decay=0.9999,
+                    epsilon_decay=0.999,
                     buffer_capacity=2048,
-                    tau=0.001)
+                    latent_dim=512,
+                    hidden_dim=64,
+                    num_layers=1,
+                    num_filters=32)
 print(agent_params['state_space_shape'])
 print(agent_params['action_space_shape'])
 
-agent = DQNAgent(**agent_params)
+agent = DDQNAgent(**agent_params)
 
 # Summary folder
 folder_name = './logs/ddqn_' + datetime.datetime.now(
