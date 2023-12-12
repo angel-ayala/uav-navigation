@@ -69,3 +69,32 @@ class QFeaturesNetwork(nn.Module):
             q_acted = torch.squeeze(q.gather(1, action.long()))
 
             return q_acted
+
+
+class DuelingQNetwork(nn.Module):
+    def __init__(self, input_shape, output_shape, fc1_units=64, fc2_units=64):
+        super(DuelingQNetwork, self).__init__()
+        state_size = input_shape[0]
+        action_size = output_shape[0]
+        self.fc_val = nn.Sequential(
+            nn.Linear(state_size, fc1_units),
+            nn.ReLU(),
+            nn.Linear(fc1_units, fc2_units),
+            nn.ReLU(),
+            nn.Linear(fc2_units, 1)
+        )
+
+        self.fc_adv = nn.Sequential(
+            nn.Linear(state_size, fc1_units),
+            nn.ReLU(),
+            nn.Linear(fc1_units, fc2_units),
+            nn.ReLU(),
+            nn.Linear(fc2_units, action_size)
+        )
+
+    def forward(self, state):
+        val = self.fc_val(state)
+        adv = self.fc_adv(state)
+
+        # Dueling Network: combine value and advantage streams
+        return val + (adv - adv.mean(dim=1, keepdim=True))

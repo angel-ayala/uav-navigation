@@ -189,3 +189,70 @@ class DDQNAgent:
         # Ensure the models are in evaluation mode after loading
         self.q_network.eval()
         self.target_q_network.eval()
+
+
+class DoubleDuelingQAgent(DDQNAgent):
+    def __init__(self,
+                 state_space_shape,
+                 action_space_shape,
+                 device,
+                 approximator,
+                 approximator_lr=1e-3,
+                 approximator_beta=0.9,
+                 approximator_tau=0.005,
+                 discount_factor=0.99,
+                 epsilon_start=1.0,
+                 epsilon_end=0.01,
+                 epsilon_decay=0.9999,
+                 buffer_capacity=2048,
+                 latent_dim=256,
+                 hidden_dim=1024,
+                 num_layers=2,
+                 num_filters=32):
+        super().__init__(state_space_shape, action_space_shape, device, approximator,
+                         approximator_lr, approximator_beta, approximator_tau,
+                         discount_factor, epsilon_start, epsilon_end, epsilon_decay,
+                         buffer_capacity, latent_dim, hidden_dim, num_layers, num_filters)
+        
+        # Q-networks
+        self.q_network = approximator(
+            state_space_shape, action_space_shape,
+            encoder_feature_dim=latent_dim,
+            hidden_dim=hidden_dim,
+            num_layers=num_layers,
+            num_filters=num_filters).to(self.device)
+        self.target_q_network = approximator(
+            state_space_shape, action_space_shape,
+            encoder_feature_dim=latent_dim,
+            hidden_dim=hidden_dim,
+            num_layers=num_layers,
+            num_filters=num_filters).to(self.device)
+        # Initialize target network with Q-network parameters
+        self._update_target_network()
+
+        self.optimizer = optim.Adam(self.q_network.parameters(),
+                                    lr=approximator_lr,
+                                    betas=(approximator_beta, 0.999))
+
+    def _update_q_network(self, sampled_data):
+        action_argmax = sampled_data[1].argmax(1)
+        # Compute Q-values using the Q-network
+        current_q_values = self.q_network(sampled_data[0]).gather(
+            dim=1, index=action_argmax.unsqueeze(1))
+
+        # Use the target network for the next Q-values
+        next_actions = self.q_network(sampled_data[3]).argmax(dim=1)
+        next_q_values = self.target_q_network(sampled_data[3]).gather(
+            dim=1, index=next_actions.unsqueeze(1)).squeeze(1).detach()
+
+        target_q_values = sampled_data[2] + self.discount_factor * \
+            (1 - sampled_data[4]) * next_q_values
+
+        # Compute the loss and backpropagate
+        loss = nn.functional.smooth_l1_loss(current_q_values, target_q_values.unsqueeze(1))
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+        # Soft update the target network
+        self._update_target_network()
