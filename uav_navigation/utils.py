@@ -7,13 +7,22 @@ Created on Sun Nov 26 14:54:52 2023
 """
 import json
 import gym
-import copy
 import numpy as np
 import time
+import sys
+import torch
+from thop import profile
 from tqdm import tqdm
 
 from webots_drone.utils import min_max_norm
 
+
+def profile_model(model, input_shape):
+    """based on https://github.com/angel-ayala/kutralnet/blob/master/utils/profiling.py"""
+    x = torch.randn(input_shape)
+    flops, params = profile(model, verbose=False,
+                            inputs=(x, ),)
+    return flops, params
 
 def save_dict_json(dict2save, json_path):
     proc_dic = dict2save.copy()
@@ -85,7 +94,7 @@ def run_agent(agent, env, training_steps, target_update_steps, mem_steps,
         elapsed_time = time.time() - timemark
         print(f"Memory fill at {elapsed_time:.4f} seconds")
         membar.clear()
-        
+
     tbar = tqdm(range(eval_interval), desc='Episode 0', leave=False,
                 unit='step', bar_format='{desc}{n:04d}|{bar}|[{rate_fmt}]')
     for step in range(training_steps):
@@ -94,8 +103,7 @@ def run_agent(agent, env, training_steps, target_update_steps, mem_steps,
             elapsed_time = time.time() - timemark
             tbar.clear()
             print(f"Episode {total_episodes:03d}: {elapsed_time:.4f} seconds", end=' - ')
-            timemark = time.time()
-            eval_reward, eval_steps = evaluate_agent(
+            eval_reward, eval_steps, eval_time = evaluate_agent(
                 agent, env, eval_epsilon, step_callback)
             if last_max_r <= eval_reward:
                 agent.save(outpath / f"agent_ep_{total_episodes:03d}.pth")
@@ -139,6 +147,7 @@ def evaluate_agent(agent, env, eval_epsilon, step_callback=None):
         step_callback.set_eval()
 
     timemark = time.time()
+    print(f"[{timemark:.4f}] Evaluation initiated.")
     while not end:
         action, reward, next_state, end = do_step(
             agent, env, state, step_callback,
@@ -146,11 +155,13 @@ def evaluate_agent(agent, env, eval_epsilon, step_callback=None):
         state = next_state
         ep_steps += 1
         ep_reward += reward
+        sys.stdout.write(f"\rR: {ep_reward}\tS: {ep_steps}")
+        sys.stdout.flush()
 
     elapsed_time = time.time() - timemark
-    print(f"Evaluation phase, {elapsed_time:.4f} seconds\t R: {ep_reward}\tS: {ep_steps}")
+    print(f"\rTotal time: {elapsed_time:.4f} seconds\t R: {ep_reward}\tS: {ep_steps}")
     agent.epsilon = curr_epsilon
-    return ep_reward, ep_steps
+    return ep_reward, ep_steps, elapsed_time
 
 
 class PreprocessObservation(gym.core.Wrapper):

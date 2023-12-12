@@ -9,7 +9,20 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from thop import clever_format
 from .utils import soft_update_params
+from .utils import profile_model
+
+
+def profile_agent(agent, state_space_shape, action_space_shape):
+    # profile q-network
+    flops, params = profile_model(agent.q_network, state_space_shape)
+    print('Q-network: {} flops, {} params'.format(
+        *clever_format([flops, params], "%.3f")))
+    flops, params = profile_model(agent.target_q_network, state_space_shape)
+    print('Target Q-network: {} flops, {} params'.format(
+        *clever_format([flops, params], "%.3f")))
+    return flops, params
 
 
 class ReplayBuffer:
@@ -135,7 +148,7 @@ class DDQNAgent:
             return np.random.randint(self.action_space_size)  # Explore
         else:
             state_tensor = torch.tensor(
-                state, dtype=torch.float32, to=self.device).unsqueeze(0)
+                state, dtype=torch.float32, device=self.device).unsqueeze(0)
             with torch.no_grad():
                 q_values = self.q_network(state_tensor).cpu().numpy()
             return np.argmax(q_values)  # Exploit

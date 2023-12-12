@@ -10,13 +10,41 @@ https://arxiv.org/abs/1910.01741
 """
 from torch import optim
 import torch.nn.functional as F
+from thop import clever_format
 from uav_navigation.agent import DDQNAgent
+from uav_navigation.agent import profile_agent as dqn_profile
+from uav_navigation.utils import profile_model
 from .net import weight_init
 from .net import MLP
 from .net import VectorApproximator
 from .net import PixelApproximator
 from .autoencoder import PixelDecoder
 from .autoencoder import preprocess_obs
+
+
+def profile_agent(agent, state_space_shape, action_space_shape):
+    total_flops, total_params = 0, 0
+    encoder = agent.encoder
+    decoder = agent.decoder
+    # profile q-network
+    flops, params = dqn_profile(agent, state_space_shape, action_space_shape)
+    total_flops += flops
+    total_params += params
+    # profile encode stage
+    flops, params = profile_model(encoder, state_space_shape)
+    total_flops += flops
+    total_params += params
+    print('Encoder: {} flops, {} params'.format(
+        *clever_format([flops, params], "%.3f")))
+    # profile decode stage
+    flops, params = profile_model(decoder, encoder.feature_dim)
+    total_flops += flops
+    total_params += params
+    print('Decoder: {} flops, {} params'.format(
+        *clever_format([flops, params], "%.3f")))
+    print('Total: {} flops, {} params'.format(
+        *clever_format([total_flops, total_params], "%.3f")))
+    return total_flops, total_params
 
 
 class AEDDQNAgent(DDQNAgent):
@@ -61,6 +89,7 @@ class AEDDQNAgent(DDQNAgent):
             num_filters=num_filters)
 
         self.encoder = self.q_network.encoder
+        self.encoder.to(self.device)
 
         if approximator == VectorApproximator:
             self.decoder = MLP(self.encoder.feature_dim,

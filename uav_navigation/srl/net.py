@@ -29,7 +29,7 @@ def weight_init(m):
         nn.init.orthogonal_(m.weight.data[:, :, mid, mid], gain)
 
 
-class MLP(nn.Module):
+class MLP(nn.Module):       
     """MLP for q-function."""
 
     def __init__(self, n_input, n_output, hidden_dim, num_layers=2, **kwargs):
@@ -49,6 +49,22 @@ class MLP(nn.Module):
         if detach:
             h = h.detach()
 
+        return h
+
+class QFunction(nn.Module):
+    def __init__(self, obs_dim, action_dim, hidden_dim):
+        super().__init__()
+
+        self.trunk = nn.Sequential(
+            nn.Linear(obs_dim, hidden_dim), nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
+            nn.Linear(hidden_dim, action_dim)
+        )
+    
+    def forward(self, obs, detach=False):
+        h = self.trunk(obs)
+        if detach:
+            h = h.detach()
         return h
 
 
@@ -81,11 +97,12 @@ class VectorApproximator(nn.Module):
 
         n_output = output_shape[0]
         n_input = input_shape[0]
-        self.encoder = MLP(n_input, encoder_feature_dim, hidden_dim,
-                           num_layers=num_layers)
+        # self.encoder = MLP(n_input, encoder_feature_dim, hidden_dim,
+        self.encoder = QFunction(n_input, encoder_feature_dim, hidden_dim)
         self.encoder.feature_dim = encoder_feature_dim
-        self.Q = MLP(encoder_feature_dim, n_output, hidden_dim,
-                     num_layers=num_layers)
+        self.Q = QFunction(encoder_feature_dim, n_output, hidden_dim)
+        # self.encoder = MLP(encoder_feature_dim, n_output, hidden_dim,
+                     # num_layers=num_layers)
         self.apply(weight_init)
 
     def forward(self, obs, detach_encoder=False):

@@ -10,23 +10,20 @@ import torch.nn as nn
 
 
 class QNetwork(nn.Module):
-    def __init__(self, state_size, action_size):
+    def __init__(self, input_shape, output_shape, **kwargs):
         super(QNetwork, self).__init__()
-        n_input = state_size[0]
-        n_output = action_size[0]
-        self.fc1 = nn.Linear(n_input, 32)
+        state_size = input_shape[0]
+        action_size = output_shape[0]
+        self.fc1 = nn.Linear(state_size, 32)
         self.fc2 = nn.Linear(32, 64)
         self.fc3 = nn.Linear(64, 512)
-        # self.fc4 = nn.Linear(16, 64)
-        self.out = nn.Linear(512, n_output)
-        self.leaky_relu = nn.LeakyReLU()
+        self.out = nn.Linear(512, action_size)
         self.drop = nn.Dropout1d(p=0.05)
 
     def forward(self, x):
         x = self.leaky_relu(self.fc1(x))
         x = torch.relu(self.fc2(x))
         x = torch.relu(self.fc3(x))
-        # x = self.leaky_relu(self.fc4(x))
         x = self.drop(x)
         x = self.out(x)
         return x
@@ -38,14 +35,14 @@ class QFeaturesNetwork(nn.Module):
     def __init__(self, input_shape, output_shape, **kwargs):
         super().__init__()
 
-        n_input = input_shape[0]
-        n_output = output_shape[0]
+        state_size = input_shape[0]
+        action_size = output_shape[0]
 
-        self._h1 = nn.Conv2d(n_input, 32, kernel_size=8, stride=4)
+        self._h1 = nn.Conv2d(state_size, 32, kernel_size=8, stride=4)
         self._h2 = nn.Conv2d(32, 64, kernel_size=4, stride=2)
         self._h3 = nn.Conv2d(64, 64, kernel_size=3, stride=1)
         self._h4 = nn.Linear(3136, self.n_features)
-        self._h5 = nn.Linear(self.n_features, n_output)
+        self._h5 = nn.Linear(self.n_features, action_size)
 
         nn.init.xavier_uniform_(self._h1.weight,
                                 gain=nn.init.calculate_gain('relu'))
