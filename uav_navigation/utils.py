@@ -45,13 +45,10 @@ def load_json_dict(json_path):
 def soft_update_params(net, target_net, tau):
     # Soft update: target_network = tau * network + (1 - tau) * target_network
     for param, target_param in zip(net.parameters(), target_net.parameters()):
-        target_param.data.copy_(
-            tau * param.data + (1 - tau) * target_param.data
-        )
+        target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
 
 
-def do_step(agent, env, state, callback=None, must_update=False,
-            must_remember=True):
+def do_step(agent, env, state, callback=None, must_remember=True):
     # Choose action using the agent's policy
     action = agent.select_action(state)
 
@@ -62,8 +59,6 @@ def do_step(agent, env, state, callback=None, must_update=False,
 
     # Update the agent based on the observed transition
     ended = done or trunc
-    if must_update:
-        agent.update()
     if must_remember:
         # Store the transition in the replay buffer if must
         agent.memory.add(state, action, reward, next_state, ended)
@@ -71,8 +66,9 @@ def do_step(agent, env, state, callback=None, must_update=False,
     return action, reward, next_state, ended
 
 
-def run_agent(agent, env, training_steps, target_update_steps, mem_steps,
-              eval_interval, eval_epsilon, outpath, step_callback=None):
+def run_agent(agent, env, training_steps, mem_steps, train_frequency,
+              target_update_steps, eval_interval, eval_epsilon, outpath,
+              step_callback=None):
     ended = True
     total_reward = 0
     total_episodes = 0
@@ -88,8 +84,7 @@ def run_agent(agent, env, training_steps, target_update_steps, mem_steps,
                 if step_callback:
                     step_callback.set_init_state(state, info)
             action, reward, next_state, ended = do_step(
-                agent, env, state, step_callback,
-                must_update=False, must_remember=True)
+                agent, env, state, step_callback, must_remember=True)
             state = next_state
         elapsed_time = time.time() - timemark
         print(f"Memory fill at {elapsed_time:.4f} seconds")
@@ -120,13 +115,19 @@ def run_agent(agent, env, training_steps, target_update_steps, mem_steps,
             if step_callback:
                 step_callback.set_init_state(state, info)
         action, reward, next_state, ended = do_step(
-            agent, env, state, step_callback,
-            must_update=step % target_update_steps == 0,
-            must_remember=True)
+            agent, env, state, step_callback, must_remember=True)
+
+        if step % train_frequency == 0:
+            agent.update()
+        
+        if step % target_update_steps == 0:
+            agent.update_target_network()
 
         ep_reward += reward
         state = next_state
         ep_steps += 1
+
+        agent.update_epsilon(step)
         tbar.update(1)
 
     return total_reward, total_episodes
@@ -147,8 +148,7 @@ def evaluate_agent(agent, env, eval_epsilon, step_callback=None):
     timemark = time.time()
     while not end:
         action, reward, next_state, end = do_step(
-            agent, env, state, step_callback,
-            must_update=False, must_remember=False)
+            agent, env, state, step_callback, must_remember=False)
         state = next_state
         ep_steps += 1
         ep_reward += reward

@@ -38,7 +38,7 @@ def parse_args():
     arg_env.add_argument("--time-limit", type=int, default=60,
                          help='Max time (seconds) of the mission.')
     arg_env.add_argument("--time-no-action", type=int, default=5,
-                         help='Max time (seconds) of the mission.')
+                         help='Max time (seconds) with no movement.')
     arg_env.add_argument("--frame-skip", type=int, default=25,  # 200ms
                          help='Number of simulation steps for a RL step')
     arg_env.add_argument("--frame-stack", type=int, default=1,
@@ -57,7 +57,7 @@ def parse_args():
                          help='Whether if state is image-based or vector-based.')
 
     arg_agent = parser.add_argument_group('Agent')
-    arg_agent.add_argument("--approximator-lr", type=float, default=1e-3,
+    arg_agent.add_argument("--approximator-lr", type=float, default=25e-5,
                            help='Q approximation function Adam learning rate.')
     arg_agent.add_argument("--approximator-beta", type=float, default=0.9,
                            help='Q approximation function Adam \beta.')
@@ -69,8 +69,8 @@ def parse_args():
                            help='Initial epsilon value for exploration.')
     arg_agent.add_argument("--epsilon-end", type=float, default=0.01,
                            help='Final epsilon value for exploration.')
-    arg_agent.add_argument("--epsilon-decay", type=float, default=0.999,
-                           help='Epsilon decay rate during training.')
+    arg_agent.add_argument("--epsilon-decay-steps", type=int, default=500000,
+                           help='Number of steps to reach minimum value for Epsilon.')
     arg_agent.add_argument("--memory-capacity", type=int, default=2048,
                            help='Maximum number of transitions in the Experience replay buffer.')
 
@@ -78,7 +78,7 @@ def parse_args():
         'State representation learning variation')
     arg_srl.add_argument("--is-srl", action='store_true',
                          help='Whether if method is SRL-based or not.')
-    arg_srl.add_argument("--latent-dim", type=int, default=512,
+    arg_srl.add_argument("--latent-dim", type=int, default=50,
                          help='Number of features in the latent representation Z.')
     arg_srl.add_argument("--hidden-dim", type=int, default=256,
                          help='Number of units in the hidden layers.')
@@ -98,10 +98,12 @@ def parse_args():
     arg_training = parser.add_argument_group('Training')
     arg_training.add_argument("--steps", type=int, default=1000000,
                               help='Number of training steps.')
-    arg_training.add_argument("--target-update", type=int, default=4,
-                              help='Steps interval for target network update.')
     arg_training.add_argument('--memory-steps', type=int, default=2048,
                               help='Number of steps for initial population of the Experience replay buffer.')
+    arg_training.add_argument("--train-frequency", type=int, default=4,
+                              help='Steps interval for Q-network batch training.')
+    arg_training.add_argument("--target-update-frequency", type=int, default=100,
+                              help='Steps interval for target network update.')
     arg_training.add_argument('--eval-interval', type=int, default=10000,
                               help='Steps interval for progress evaluation.')
     arg_training.add_argument('--eval-epsilon', type=float, default=0.01,
@@ -168,7 +170,7 @@ if __name__ == '__main__':
         discount_factor=args.discount_factor,
         epsilon_start=args.epsilon_start,
         epsilon_end=args.epsilon_end,
-        epsilon_decay=args.epsilon_decay,
+        epsilon_decay_steps=args.epsilon_decay_steps,
         buffer_capacity=args.memory_capacity,
     )
 
@@ -206,8 +208,9 @@ if __name__ == '__main__':
 
     run_params = dict(
         training_steps=args.steps,
-        target_update_steps=args.target_update,
         mem_steps=args.memory_steps,
+        train_frequency=args.train_frequency,
+        target_update_steps=args.target_update_frequency,
         eval_interval=args.eval_interval,
         eval_epsilon=args.eval_epsilon,
         outpath=outfolder)
