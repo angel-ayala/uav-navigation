@@ -204,7 +204,8 @@ if __name__ == '__main__':
     outfolder.mkdir(parents=True)
     print('outfolder', outfolder)
 
-    store_callback = StoreStepData(outfolder / 'history_training.csv')
+    store_callback = StoreStepData(outfolder / 'history_training.csv',
+                                   epsilon=lambda: agent.epsilon)
 
     run_params = dict(
         training_steps=args.steps,

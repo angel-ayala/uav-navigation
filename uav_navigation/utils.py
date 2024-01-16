@@ -87,8 +87,8 @@ def run_agent(agent, env, training_steps, mem_steps, train_frequency,
                 agent, env, state, step_callback, must_remember=True)
             state = next_state
         elapsed_time = time.time() - timemark
-        print(f"Memory fill at {elapsed_time:.4f} seconds")
         membar.clear()
+        del membar
 
     tbar = tqdm(range(eval_interval), desc='Episode 0', leave=False,
                 unit='step', bar_format='{desc}{n:04d}|{bar}|[{rate_fmt}]')
@@ -97,7 +97,10 @@ def run_agent(agent, env, training_steps, mem_steps, train_frequency,
         if step % eval_interval == 0:
             elapsed_time = time.time() - timemark
             tbar.clear()
-            print(f"Episode {total_episodes:03d}: {elapsed_time:.4f} seconds", end=' - ')
+            if total_episodes == 0:
+                print(f"Memory fill at {elapsed_time:.3f} seconds")
+            else:
+                print(f"Episode {total_episodes:03d}\n- Learning: {elapsed_time:.3f} seconds\tR: {ep_reward:.4f}\tS: {ep_steps}")
             agent.save(outpath / f"agent_ep_{total_episodes:03d}.pth")
             eval_reward, eval_steps, eval_time = evaluate_agent(
                 agent, env, eval_epsilon, step_callback)
@@ -114,6 +117,7 @@ def run_agent(agent, env, training_steps, mem_steps, train_frequency,
             state, info = env.reset()
             if step_callback:
                 step_callback.set_init_state(state, info)
+                step_callback.set_learning()
         action, reward, next_state, ended = do_step(
             agent, env, state, step_callback, must_remember=True)
 
@@ -152,11 +156,13 @@ def evaluate_agent(agent, env, eval_epsilon, step_callback=None):
         state = next_state
         ep_steps += 1
         ep_reward += reward
-        sys.stdout.write(f"\rR: {ep_reward}\tS: {ep_steps}")
+        sys.stdout.write(f"\rR: {ep_reward:.4f}\tS: {ep_steps}")
         sys.stdout.flush()
 
     elapsed_time = time.time() - timemark
-    print(f"\rEvaluation: {elapsed_time:.4f} seconds\tR: {ep_reward}\tS: {ep_steps}")
+    sys.stdout.flush()
+    sys.stdout.write(f"\r- Evaluation: {elapsed_time:.3f} seconds\tR: {ep_reward:.4f}\tS: {ep_steps}\n")
+    sys.stdout.flush()
     agent.epsilon = curr_epsilon
     return ep_reward, ep_steps, elapsed_time
 

@@ -61,7 +61,7 @@ class AEDDQNAgent(DDQNAgent):
                  discount_factor=0.99,
                  epsilon_start=1.0,
                  epsilon_end=0.01,
-                 epsilon_decay=0.9999,
+                 epsilon_decay_steps=500000,
                  buffer_capacity=2048,
                  latent_dim=256,
                  hidden_dim=1024,
@@ -83,7 +83,7 @@ class AEDDQNAgent(DDQNAgent):
             discount_factor=discount_factor,
             epsilon_start=epsilon_start,
             epsilon_end=epsilon_end,
-            epsilon_decay=epsilon_decay,
+            epsilon_decay_steps=epsilon_decay_steps,
             buffer_capacity=buffer_capacity)
 
         # Re initialize Q-networks with proper parameters
@@ -107,7 +107,7 @@ class AEDDQNAgent(DDQNAgent):
         self.encoder.to(self.device)
 
         # Initialize target network with Q-network parameters
-        self._update_target_network()
+        self.update_target_network()
         self.optimizer = optim.Adam(self.q_network.parameters(),
                                     lr=approximator_lr,
                                     betas=(approximator_beta, 0.999))
@@ -161,11 +161,8 @@ class AEDDQNAgent(DDQNAgent):
     def update(self):
         # Update the Q-network if replay buffer is sufficiently large
         if len(self.memory) >= self.BATCH_SIZE:
-            sampled_data = self.memory.sample(self.BATCH_SIZE,
-                                              device=self.device)
+            sampled_data = self.memory.sample(
+                self.BATCH_SIZE, device=self.device)
             self._update_q_network(sampled_data)
             # update the autoencoder
             self.update_decoder(sampled_data[0], sampled_data[0])
-
-        # Anneal exploration rate
-        self.epsilon = max(self.epsilon * self.epsilon_decay, self.epsilon_end)
