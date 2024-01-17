@@ -13,6 +13,7 @@ import torch.nn.functional as F
 from thop import clever_format
 from uav_navigation.agent import DDQNAgent
 from uav_navigation.utils import profile_model
+from uav_navigation.memory import PrioritizedReplayBuffer
 from .net import weight_init
 from .net import MLP
 from .net import VectorApproximator
@@ -61,8 +62,8 @@ class AEDDQNAgent(DDQNAgent):
                  discount_factor=0.99,
                  epsilon_start=1.0,
                  epsilon_end=0.01,
-                 epsilon_decay_steps=500000,
-                 buffer_capacity=2048,
+                 epsilon_steps=500000,
+                 memory_buffer=None,
                  latent_dim=256,
                  hidden_dim=1024,
                  num_layers=2,
@@ -83,8 +84,8 @@ class AEDDQNAgent(DDQNAgent):
             discount_factor=discount_factor,
             epsilon_start=epsilon_start,
             epsilon_end=epsilon_end,
-            epsilon_decay_steps=epsilon_decay_steps,
-            buffer_capacity=buffer_capacity)
+            epsilon_steps=epsilon_steps,
+            memory_buffer=memory_buffer)
 
         # Re initialize Q-networks with proper parameters
         del self.q_network
@@ -165,4 +166,7 @@ class AEDDQNAgent(DDQNAgent):
                 self.BATCH_SIZE, device=self.device)
             self._update_q_network(sampled_data)
             # update the autoencoder
-            self.update_decoder(sampled_data[0], sampled_data[0])
+            if isinstance(self.memory, PrioritizedReplayBuffer):
+                self.update_decoder(sampled_data[0][0], sampled_data[0][0])
+            else:
+                self.update_decoder(sampled_data[0], sampled_data[0])

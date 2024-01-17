@@ -12,7 +12,7 @@ import torch.optim as optim
 from thop import clever_format
 from .utils import soft_update_params
 from .utils import profile_model
-from .memory import ReplayBuffer
+from .memory import PrioritizedReplayBuffer
 
 
 def profile_agent(agent, state_space_shape, action_space_shape):
@@ -42,12 +42,12 @@ class DDQNAgent:
                  discount_factor=0.99,
                  epsilon_start=1.0,
                  epsilon_end=0.01,
-                 epsilon_decay_steps=500000,
-                 buffer_capacity=2048):
+                 epsilon_steps=500000,
+                 memory_buffer=None):
         self.discount_factor = discount_factor
         self.epsilon_start = epsilon_start
         self.epsilon_end = epsilon_end
-        self.epsilon_decay = (epsilon_start - epsilon_end) / epsilon_decay_steps
+        self.epsilon_decay = (epsilon_start - epsilon_end) / epsilon_steps
         self.update_epsilon(0)
 
         self.action_space_size = action_space_shape[0]
@@ -67,8 +67,7 @@ class DDQNAgent:
                                     betas=(approximator_beta, 0.999))
 
         # Replay Buffer
-        self.memory = ReplayBuffer(buffer_capacity, state_space_shape,
-                                   action_space_shape)
+        self.memory = memory_buffer
 
     def select_action(self, state):
         # Choose action using epsilon-greedy policy
@@ -85,6 +84,8 @@ class DDQNAgent:
         # Anneal exploration rate
         self.epsilon = max(self.epsilon_end,
                            self.epsilon_start - (self.epsilon_decay * n_step))
+        if isinstance(self.memory, PrioritizedReplayBuffer):
+            self.memory.update_beta(n_step)
 
     def update_target_network(self):
         # Soft update the target network
@@ -100,7 +101,12 @@ class DDQNAgent:
             self._update_q_network(sampled_data)
 
     def _update_q_network(self, sampled_data):
-        states, actions, rewards, next_states, dones = sampled_data
+        if isinstance(self.memory, PrioritizedReplayBuffer):
+            (states, actions, rewards, next_states, dones
+             ), priorities = sampled_data
+        else:
+            states, actions, rewards, next_states, dones = sampled_data
+
         actions_argmax = actions.argmax(-1)
         # Compute Q-values using the Q-network
         current_q_values = self.q_network(states).gather(
@@ -108,18 +114,27 @@ class DDQNAgent:
 
         # Use the target network for the next Q-values
         with torch.no_grad():
-            double_q_values = self.q_network(next_states)
-            next_actions_argmax = torch.argmax(double_q_values, -1)
-            
-            next_q_values = self.target_q_network(next_states).gather(
+            next_q_values = self.q_network(next_states)
+            next_actions_argmax = torch.argmax(next_q_values, -1)
+
+            double_q_values = self.target_q_network(next_states).gather(
                 dim=-1, index=next_actions_argmax.unsqueeze(-1)).squeeze(-1)
 
-            td_target = rewards + self.discount_factor * next_q_values * (1 - dones)
-            td_error = current_q_values - td_target
+            td_targets = rewards + self.discount_factor * double_q_values * (1 - dones)
+            if isinstance(self.memory, PrioritizedReplayBuffer):
+                td_errors = current_q_values - td_targets
 
         # Compute the loss and backpropagate
-        losses = self.huber_loss(current_q_values, td_target)
-        loss = torch.mean(losses)
+        losses = self.huber_loss(current_q_values, td_targets)
+        if isinstance(self.memory, PrioritizedReplayBuffer):
+            # Calculate priorities for replay buffer $p_i = |\delta_i| + \epsilon$
+            new_priorities = np.abs(td_errors.cpu().numpy()) + 1e-6
+            # Update replay buffer priorities
+            self.memory.update_priorities(priorities['indexes'],
+                                          new_priorities)
+            loss = torch.mean(losses * priorities['weights'])
+        else:
+            loss = torch.mean(losses)
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
@@ -142,6 +157,7 @@ class DDQNAgent:
         self.target_q_network.eval()
 
 
+# TODO: update for PrioritizedReplayBuffer
 class DoubleDuelingQAgent(DDQNAgent):
     def __init__(self,
                  state_space_shape,

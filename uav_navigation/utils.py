@@ -18,7 +18,9 @@ from webots_drone.utils import min_max_norm
 
 
 def profile_model(model, input_shape, device):
-    """based on https://github.com/angel-ayala/kutralnet/blob/master/utils/profiling.py"""
+    """Profiling developed models.
+
+    based on https://github.com/angel-ayala/kutralnet/blob/master/utils/profiling.py"""
     x = torch.randn(input_shape).unsqueeze(0).to(device)
     flops, params = profile(model, verbose=False,
                             inputs=(x, ),)

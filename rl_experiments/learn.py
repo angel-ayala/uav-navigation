@@ -25,6 +25,7 @@ from uav_navigation.net import QFeaturesNetwork
 from uav_navigation.utils import save_dict_json
 from uav_navigation.utils import run_agent
 from uav_navigation.utils import PreprocessObservation
+from uav_navigation.memory import ReplayBuffer, PrioritizedReplayBuffer
 
 
 from webots_drone.data import StoreStepData
@@ -69,10 +70,16 @@ def parse_args():
                            help='Initial epsilon value for exploration.')
     arg_agent.add_argument("--epsilon-end", type=float, default=0.01,
                            help='Final epsilon value for exploration.')
-    arg_agent.add_argument("--epsilon-decay-steps", type=int, default=500000,
+    arg_agent.add_argument("--epsilon-steps", type=int, default=500000,
                            help='Number of steps to reach minimum value for Epsilon.')
     arg_agent.add_argument("--memory-capacity", type=int, default=2048,
                            help='Maximum number of transitions in the Experience replay buffer.')
+    arg_agent.add_argument("--memory-prioritized", action='store_true',
+                           help='Whether if memory buffer is Prioritized experiencie replay or not.')
+    arg_agent.add_argument("--prioritized-alpha", type=float, default=0.6,
+                           help='Alpha prioritization exponent for PER.')
+    arg_agent.add_argument("--prioritized-initial-beta", type=float, default=0.4,
+                           help='Beta bias for sampling for PER.')
 
     arg_srl = parser.add_argument_group(
         'State representation learning variation')
@@ -141,6 +148,7 @@ if __name__ == '__main__':
 
     # Create the environment
     env = gym.make(environment_name, **env_params)
+
     # Observation preprocessing
     env = PreprocessObservation(env, is_pixels=args.is_pixels)
     env_params['frame_stack'] = args.frame_stack
@@ -155,8 +163,8 @@ if __name__ == '__main__':
         agent_approximator = PixelApproximator\
             if args.is_pixels else VectorApproximator
     else:
-        agent_approximator = QFeaturesNetwork if args.is_pixels else QNetwork
         agent_class = DDQNAgent
+        agent_approximator = QFeaturesNetwork if args.is_pixels else QNetwork
 
     # Agent args
     agent_params = dict(
@@ -171,7 +179,6 @@ if __name__ == '__main__':
         epsilon_start=args.epsilon_start,
         epsilon_end=args.epsilon_end,
         epsilon_decay_steps=args.epsilon_decay_steps,
-        buffer_capacity=args.memory_capacity,
     )
 
     # Append SRL parameters
@@ -187,11 +194,29 @@ if __name__ == '__main__':
             decoder_weight_decay=args.decoder_weight_decay
         ))
 
-    print(agent_params['state_space_shape'])
-    print(agent_params['action_space_shape'])
+    # Memory buffer args
+    memory_params = dict(
+        buffer_size=args.memory_capacity,
+        state_shape=agent_params['state_space_shape'],
+        action_shape=agent_params['action_space_shape'],
+    )
+    memory_class = ReplayBuffer
+
+    if args.memory_prioritized:
+        memory_params.update(dict(
+            alpha=args.prioritized_alpha,
+            beta=args.prioritized_beta,
+            beta_steps=args.steps // args.train_frequency
+        ))
+        memory_class = PrioritizedReplayBuffer
 
     # RL training
+    memory_buffer = memory_class(**memory_params)
+    agent_params.update(dict(memory_buffer=memory_buffer))
     agent = agent_class(**agent_params)
+    # update params to save info
+    memory_params.update(dict(is_prioritized=args.memory_prioritized))
+    agent_params.update(dict(memory_buffer=memory_params))
 
     if args.logspath is None:
         path_prefix = 'drone_pixels' if args.is_pixels else 'drone_vector'
@@ -202,7 +227,7 @@ if __name__ == '__main__':
     else:
         outfolder = Path(args.logspath)
     outfolder.mkdir(parents=True)
-    print('outfolder', outfolder)
+    print('Saving logs at:', outfolder)
 
     store_callback = StoreStepData(outfolder / 'history_training.csv',
                                    epsilon=lambda: agent.epsilon)
