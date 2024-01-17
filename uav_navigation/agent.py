@@ -48,7 +48,6 @@ class DDQNAgent:
         self.epsilon_start = epsilon_start
         self.epsilon_end = epsilon_end
         self.epsilon_decay = (epsilon_start - epsilon_end) / epsilon_steps
-        self.update_epsilon(0)
 
         self.action_space_size = action_space_shape[0]
         self.approximator_tau = approximator_tau  # Soft update parameter
@@ -68,6 +67,7 @@ class DDQNAgent:
 
         # Replay Buffer
         self.memory = memory_buffer
+        self.update_epsilon(0)
 
     def select_action(self, state):
         # Choose action using epsilon-greedy policy

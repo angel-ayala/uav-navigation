@@ -144,7 +144,6 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         super().__init__(buffer_size, state_shape, action_shape)
         # $\alpha$
         self.alpha = alpha
-        self.beta = beta
         self.beta_start = beta
         self.beta_rate = (1 - beta) / beta_steps
 
@@ -270,6 +269,8 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         if device is None:
             return (states, actions, rewards, next_states, dones), samples
         else:
+            samples['weights'] = torch.tensor(samples['weights'],
+                                              dtype=torch.float32).to(device)
             return (
                 torch.tensor(states, dtype=torch.float32).to(device),
                 torch.tensor(actions, dtype=torch.float32).to(device),

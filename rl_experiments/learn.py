@@ -178,7 +178,7 @@ if __name__ == '__main__':
         discount_factor=args.discount_factor,
         epsilon_start=args.epsilon_start,
         epsilon_end=args.epsilon_end,
-        epsilon_decay_steps=args.epsilon_decay_steps,
+        epsilon_steps=args.epsilon_steps,
     )
 
     # Append SRL parameters
@@ -205,7 +205,7 @@ if __name__ == '__main__':
     if args.memory_prioritized:
         memory_params.update(dict(
             alpha=args.prioritized_alpha,
-            beta=args.prioritized_beta,
+            beta=args.prioritized_initial_beta,
             beta_steps=args.steps // args.train_frequency
         ))
         memory_class = PrioritizedReplayBuffer
