@@ -111,6 +111,8 @@ def run_agent(agent, env, training_steps, mem_steps, train_frequency,
             tbar.reset()
             tbar.set_description(f"Episode {total_episodes:03d}")
             ended = True
+            if step_callback:
+                step_callback.new_episode()
             timemark = time.time()
 
         if ended:
@@ -125,7 +127,7 @@ def run_agent(agent, env, training_steps, mem_steps, train_frequency,
 
         if step % train_frequency == 0:
             agent.update()
-        
+
         if step % target_update_steps == 0:
             agent.update_target_network()
 
