@@ -185,7 +185,7 @@ class DDQNAgent:
         if self.is_prioritized:
             td_errors = q_values - td_targets
             # Calculate priorities for replay buffer $p_i = |\delta_i| + \epsilon$
-            new_priorities = np.abs(td_errors.cpu().numpy()) + 1e-6
+            new_priorities = np.abs(td_errors.detach().cpu().numpy()) + 1e-6
             # Update replay buffer priorities
             self.memory.update_priorities(priorities['indexes'],
                                           new_priorities)
