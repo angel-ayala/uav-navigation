@@ -195,10 +195,10 @@ class DDQNAgent:
         self.approximator.optimize(loss)
 
     def save(self, path):
-        self.approximator.save(path)
+        self.approximator.save(str(path) + ".pth")
 
     def load(self, path):
-        self.approximator.load(path, eval_only=True)
+        self.approximator.load(str(path) + ".pth", eval_only=True)
 
 
 # TODO: update for PrioritizedReplayBuffer

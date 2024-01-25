@@ -49,6 +49,34 @@ def profile_agent(agent, state_space_shape, action_space_shape):
     return total_flops, total_params
 
 
+def reconstruction_loss(obs, target_obs, encoder, decoder,
+                        decoder_latent_lambda):
+    h = encoder(obs)
+
+    if target_obs.dim() == 4:
+        # preprocess images to be in [-0.5, 0.5] range
+        target_obs = preprocess_obs(target_obs)
+    rec_obs = decoder(h)
+    rec_loss = F.mse_loss(target_obs, rec_obs)
+
+    # add L2 penalty on latent representation
+    # see https://arxiv.org/pdf/1903.12436.pdf
+    latent_loss = (0.5 * h.pow(2).sum(1)).mean()
+
+    loss = rec_loss + decoder_latent_lambda * latent_loss
+    return loss
+
+def optimize_reconstruction(rloss, optimizer):
+    # encoder optimizer
+    optimizer[0].zero_grad()
+    # decoder optimizer
+    optimizer[1].zero_grad()
+    rloss.backward()
+
+    optimizer[0].step()
+    optimizer[1].step()
+
+
 class SRLFunction(QFunction):
     def __init__(self, q_app_fn, q_app_params, learning_rate=1e-3,
                  adam_beta1=0.9, tau=0.005, use_cuda=True,
@@ -101,31 +129,51 @@ class SRLFunction(QFunction):
 
         return super().compute_q_target(state_inference, actions)
 
-    def reconstruction_loss(self, obs, target_obs, encoder, decoder):
-        h = encoder(obs)
+    def save(self, path, ae_models, encoder_only=False):
+        q_app_path = str(path) + "_q_function.pth"
+        super().save(q_app_path)
 
-        if target_obs.dim() == 4:
-            # preprocess images to be in [-0.5, 0.5] range
-            target_obs = preprocess_obs(target_obs)
-        rec_obs = decoder(h)
-        rec_loss = F.mse_loss(target_obs, rec_obs)
+        for i, (m, m_params) in enumerate(ae_models):
+            encoder, decoder = self.models[i]
+            encoder_opt, decoder_opt = self.optimizers[i]
+            state_dict = dict(encoder_state_dict=encoder.state_dict(),
+                              encoder_optimizer_state_dict=encoder_opt.state_dict())
 
-        # add L2 penalty on latent representation
-        # see https://arxiv.org/pdf/1903.12436.pdf
-        latent_loss = (0.5 * h.pow(2).sum(1)).mean()
+            if not encoder_only:
+                state_dict.update(dict(decoder_state_dict=decoder.state_dict(),
+                                  decoder_optimizer_state_dict=decoder_opt.state_dict()))
 
-        loss = rec_loss + self.decoder_latent_lambda * latent_loss
-        return loss
+            q_app_path = str(path) + f"_ae_{m}.pth"
+            torch.save(state_dict, q_app_path)
 
-    def optimize_reconstruction(self, rloss, optimizer):
-        # encoder optimizer
-        optimizer[0].zero_grad()
-        # decoder optimizer
-        optimizer[1].zero_grad()
-        rloss.backward()
+    def load(self, path, ae_models, encoder_only=False, eval_only=False):
+        q_app_path = str(path) + "_q_function.pth"
+        super().load(q_app_path, eval_only=eval_only)
 
-        optimizer[0].step()
-        optimizer[1].step()
+        for i, (m, m_params) in enumerate(ae_models):
+            encoder, decoder = self.models[i]
+            encoder_opt, decoder_opt = self.optimizers[i]
+
+            q_app_path = str(path) + f"_ae_{m}.pth"
+            checkpoint = torch.load(q_app_path)
+
+            encoder.load_state_dict(checkpoint['encoder_state_dict'])
+            encoder_opt.load_state_dict(
+                checkpoint['encoder_optimizer_state_dict'])
+            if eval_only:
+                # Ensure the models are in evaluation mode after loading
+                encoder.eval()
+                encoder_opt.eval()
+
+            if not encoder_only:
+                decoder.load_state_dict(checkpoint['decoder_state_dict'])
+                decoder_opt.load_state_dict(
+                    checkpoint['decoder_optimizer_state_dict'])
+
+                if eval_only:
+                    # Ensure the models are in evaluation mode after loading
+                    decoder.eval()
+                    decoder_opt.eval()
 
 
 class SRLDDQNAgent(DDQNAgent):
@@ -171,13 +219,12 @@ class SRLDDQNAgent(DDQNAgent):
 
         self.ae_models = ae_models
 
-    def update_reconstruction(self, obs, target_obs):
+    def update_reconstruction(self, obs):
         for i in range(len(self.ae_models)):
             encoder, decoder = self.approximator.models[i]
-            rloss = self.approximator.reconstruction_loss(obs, target_obs,
-                                                          encoder, decoder)
-            self.approximator.optimize_reconstruction(
-                rloss, self.approximator.optimizers[i])
+            rloss = reconstruction_loss(obs, obs, encoder, decoder,
+                                        self.approximator.decoder_latent_lambda)
+            optimize_reconstruction(rloss, self.approximator.optimizers[i])
 
     def update(self):
         # Update the Q-network if replay buffer is sufficiently large
@@ -187,7 +234,13 @@ class SRLDDQNAgent(DDQNAgent):
             self.update_approximator(sampled_data)
             # update the autoencoder
             if self.is_prioritized:
-                self.update_reconstruction(sampled_data[0][0],
-                                           sampled_data[0][0])
+                self.update_reconstruction(sampled_data[0][0])
             else:
-                self.update_reconstruction(sampled_data[0], sampled_data[0])
+                self.update_reconstruction(sampled_data[0])
+
+    def save(self, path):
+        self.approximator.save(path, ae_models=self.ae_models.items())
+
+    def load(self, path, eval_only=True):
+        self.approximator.load(path, ae_models=self.ae_models.items(),
+                               eval_only=eval_only)

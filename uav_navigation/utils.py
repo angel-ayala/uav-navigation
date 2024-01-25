@@ -103,7 +103,7 @@ def run_agent(agent, env, training_steps, mem_steps, train_frequency,
                 print(f"Memory fill at {elapsed_time:.3f} seconds")
             else:
                 print(f"Episode {total_episodes:03d}\n- Learning: {elapsed_time:.3f} seconds\tR: {ep_reward:.4f}\tS: {ep_steps}")
-            agent.save(outpath / f"agent_ep_{total_episodes:03d}.pth")
+            agent.save(outpath / f"agent_ep_{total_episodes:03d}")
             eval_reward, eval_steps, eval_time = evaluate_agent(
                 agent, env, eval_epsilon, step_callback)
             total_episodes += 1
