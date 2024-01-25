@@ -7,6 +7,10 @@ import torch
 import numpy as np
 
 
+def is_prioritized_memory(memory):
+    return isinstance(memory, PrioritizedReplayBuffer)
+
+
 class ReplayBuffer:
     def __init__(self, buffer_size, state_shape, action_shape):
         self.buffer_size = buffer_size

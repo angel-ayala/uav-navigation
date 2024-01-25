@@ -129,7 +129,7 @@ def run_agent(agent, env, training_steps, mem_steps, train_frequency,
             agent.update()
 
         if step % target_update_steps == 0:
-            agent.update_target_network()
+            agent.update_target()
 
         ep_reward += reward
         state = next_state

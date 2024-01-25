@@ -11,7 +11,8 @@ https://arxiv.org/abs/1910.01741
 import torch
 from torch import nn
 
-from uav_navigation.srl.autoencoder import PixelEncoder
+
+OUT_DIM = {2: 39, 4: 35, 6: 31}
 
 
 def weight_init(m):
@@ -28,6 +29,43 @@ def weight_init(m):
         mid = m.weight.size(2) // 2
         gain = nn.init.calculate_gain('relu')
         nn.init.orthogonal_(m.weight.data[:, :, mid, mid], gain)
+
+
+def tie_weights(src, trg):
+    assert type(src) == type(trg)
+    trg.weight = src.weight
+    trg.bias = src.bias
+
+
+def preprocess_obs(obs, bits=5):
+    """Preprocessing image, see https://arxiv.org/abs/1807.03039."""
+    bins = 2**bits
+    assert obs.dtype == torch.float32
+    if bits < 8:
+        obs = torch.floor(obs / 2**(8 - bits))
+    obs = obs / bins
+    obs = obs + torch.rand_like(obs) / bins
+    obs = obs - 0.5
+    return obs
+
+
+def rgb_reconstruction_model(state_shape, latent_dim, num_layers=2,
+                             num_filters=32):
+    encoder = PixelEncoder(state_shape, latent_dim, num_layers=num_layers,
+                           num_filters=num_filters)
+    decoder = PixelDecoder(state_shape, latent_dim, num_layers=num_layers,
+                           num_filters=num_filters)
+    return encoder, decoder
+
+
+def vector_reconstruction_model(state_shape, hidden_dim, latent_dim,
+                                num_layers=2):
+    encoder = MLP(state_shape[0], latent_dim, hidden_dim, num_layers=num_layers)
+    decoder = MLP(latent_dim, state_shape[0], hidden_dim, num_layers=num_layers)
+    return encoder, decoder
+
+def q_function(latent_dim, action_shape, hidden_dim, num_layers=2):
+    return MLP(latent_dim, action_shape[0], hidden_dim, num_layers=num_layers)
 
 
 class MLP(nn.Module):
@@ -54,48 +92,86 @@ class MLP(nn.Module):
         return h
 
 
-class VectorApproximator(nn.Module):
-    def __init__(self,
-                 input_shape,
-                 output_shape,
-                 num_layers=2,
-                 hidden_dim=256,
-                 feature_dim=50):
+class PixelEncoder(nn.Module):
+    """Convolutional encoder of pixels observations."""
+
+    def __init__(self, state_shape, latent_dim, num_layers=2, num_filters=32):
         super().__init__()
 
-        n_output = output_shape[0]
-        n_input = input_shape[0]
-        self.encoder = MLP(n_input, feature_dim, hidden_dim,
-                           num_layers=num_layers)
-        self.Q = MLP(feature_dim, n_output, hidden_dim,
-                     num_layers=num_layers)
+        assert len(state_shape) == 3
 
-    def forward(self, obs, detach_encoder=False):
-        # detach_encoder allows to stop gradient propogation to encoder
-        z = self.encoder(obs, detach=detach_encoder)
-        q = self.Q(z)
+        self.feature_dim = latent_dim
+        self.num_layers = num_layers
 
-        return q
+        self.convs = nn.ModuleList(
+            [nn.Conv2d(state_shape[0], num_filters, 3, stride=2)]
+        )
+        for i in range(num_layers - 1):
+            self.convs.append(nn.Conv2d(num_filters, num_filters, 3, stride=1))
+
+        out_dim = OUT_DIM[num_layers]
+        self.fc = nn.Linear(num_filters * out_dim * out_dim, self.feature_dim)
+        self.ln = nn.LayerNorm(self.feature_dim)
+
+    def forward_conv(self, obs):
+
+        conv = torch.relu(self.convs[0](obs))
+
+        for i in range(1, self.num_layers):
+            conv = torch.relu(self.convs[i](conv))
+
+        h = conv.view(conv.size(0), -1)
+        return h
+
+    def forward(self, obs, detach=False):
+        h = self.forward_conv(obs)
+        if detach:
+            h = h.detach()
+
+        h_fc = self.fc(h)
+        h_norm = self.ln(h_fc)
+        out = torch.tanh(h_norm)
+
+        return out
+
+    def copy_conv_weights_from(self, source):
+        """Tie convolutional layers"""
+        # only tie conv layers
+        for i in range(self.num_layers):
+            tie_weights(src=source.convs[i], trg=self.convs[i])
 
 
-class PixelApproximator(nn.Module):
-    def __init__(self,
-                 input_shape,
-                 output_shape,
-                 num_layers=2,
-                 hidden_dim=256,
-                 feature_dim=50,
-                 num_filters=32):
+class PixelDecoder(nn.Module):
+    def __init__(self, state_shape, latent_dim, num_layers=2, num_filters=32):
         super().__init__()
 
-        n_output = output_shape[0]
-        self.encoder = PixelEncoder(input_shape, feature_dim,
-                                    num_layers, num_filters)
-        self.Q = MLP(self.encoder.feature_dim, n_output, hidden_dim)
+        self.num_layers = num_layers
+        self.num_filters = num_filters
+        self.out_dim = OUT_DIM[num_layers]
 
-    def forward(self, obs, detach_encoder=False):
-        # detach_encoder allows to stop gradient propogation to encoder
-        z = self.encoder(obs, detach=detach_encoder)
-        q = self.Q(z)
+        self.fc = nn.Linear(
+            latent_dim, num_filters * self.out_dim * self.out_dim
+        )
 
-        return q
+        self.deconvs = nn.ModuleList()
+
+        for i in range(self.num_layers - 1):
+            self.deconvs.append(
+                nn.ConvTranspose2d(num_filters, num_filters, 3, stride=1)
+            )
+        self.deconvs.append(
+            nn.ConvTranspose2d(
+                num_filters, state_shape[0], 3, stride=2, output_padding=1
+            )
+        )
+
+    def forward(self, h):
+        h = torch.relu(self.fc(h))
+        deconv = h.view(-1, self.num_filters, self.out_dim, self.out_dim)
+
+        for i in range(0, self.num_layers - 1):
+            deconv = torch.relu(self.deconvs[i](deconv))
+
+        obs = self.deconvs[-1](deconv)
+
+        return obs

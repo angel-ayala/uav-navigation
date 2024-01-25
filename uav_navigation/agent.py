@@ -10,9 +10,9 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from thop import clever_format
-from .utils import soft_update_params
 from .utils import profile_model
-from .memory import PrioritizedReplayBuffer
+from .utils import soft_update_params
+from .memory import is_prioritized_memory
 
 
 def profile_agent(agent, state_space_shape, action_space_shape):
@@ -28,115 +28,69 @@ def profile_agent(agent, state_space_shape, action_space_shape):
     return flops, params
 
 
-class DDQNAgent:
-    BATCH_SIZE = 32
+class QFunction:
 
-    def __init__(self,
-                 state_space_shape,
-                 action_space_shape,
-                 device,
-                 approximator,
-                 approximator_lr=1e-3,
-                 approximator_beta=0.9,
-                 approximator_tau=0.005,
-                 discount_factor=0.99,
-                 epsilon_start=1.0,
-                 epsilon_end=0.01,
-                 epsilon_steps=500000,
-                 memory_buffer=None):
-        self.discount_factor = discount_factor
-        self.epsilon_start = epsilon_start
-        self.epsilon_end = epsilon_end
-        self.epsilon_decay = (epsilon_start - epsilon_end) / epsilon_steps
+    def __init__(self, q_app_fn, q_app_params, learning_rate=1e-3,
+                 adam_beta1=0.9, tau=0.005, use_cuda=True):
 
-        self.action_space_size = action_space_shape[0]
-        self.approximator_tau = approximator_tau  # Soft update parameter
-        self.device = torch.device(device)
-        self.huber_loss = nn.SmoothL1Loss(reduction='none')
+        self.device = 'cuda'\
+            if torch.cuda.is_available() and use_cuda else 'cpu'
+
+        self.tau = tau
+
         # Q-networks
-        self.q_network = approximator(
-            state_space_shape, action_space_shape).to(self.device)
-        self.target_q_network = approximator(
-            state_space_shape, action_space_shape).to(self.device)
+        self.q_network = q_app_fn(**q_app_params).to(self.device)
+        self.target_q_network = q_app_fn(**q_app_params).to(self.device)
+
         # Initialize target network with Q-network parameters
         self.update_target_network()
 
+        # optimization function
+        self.loss_fn = nn.SmoothL1Loss(reduction='none')
         self.optimizer = optim.Adam(self.q_network.parameters(),
-                                    lr=approximator_lr,
-                                    betas=(approximator_beta, 0.999))
-
-        # Replay Buffer
-        self.memory = memory_buffer
-        self.update_epsilon(0)
-
-    def select_action(self, state):
-        # Choose action using epsilon-greedy policy
-        if np.random.rand() < self.epsilon:
-            return np.random.randint(self.action_space_size)  # Explore
-        else:
-            state_tensor = torch.tensor(
-                state, dtype=torch.float32, device=self.device).unsqueeze(0)
-            with torch.no_grad():
-                q_values = self.q_network(state_tensor).cpu().numpy()
-            return np.argmax(q_values)  # Exploit
-
-    def update_epsilon(self, n_step):
-        # Anneal exploration rate
-        self.epsilon = max(self.epsilon_end,
-                           self.epsilon_start - (self.epsilon_decay * n_step))
-        if isinstance(self.memory, PrioritizedReplayBuffer):
-            self.memory.update_beta(n_step)
+                                    lr=learning_rate,
+                                    betas=(adam_beta1, 0.999))
 
     def update_target_network(self):
         # Soft update the target network
         soft_update_params(net=self.q_network,
                            target_net=self.target_q_network,
-                           tau=self.approximator_tau)
+                           tau=self.tau)
 
-    def update(self):
-        # Update the Q-network if replay buffer is sufficiently large
-        if len(self.memory) >= self.BATCH_SIZE:
-            sampled_data = self.memory.sample(
-                self.BATCH_SIZE, device=self.device)
-            self._update_q_network(sampled_data)
-
-    def _update_q_network(self, sampled_data):
-        if isinstance(self.memory, PrioritizedReplayBuffer):
-            (states, actions, rewards, next_states, dones
-             ), priorities = sampled_data
-        else:
-            states, actions, rewards, next_states, dones = sampled_data
-
-        actions_argmax = actions.argmax(-1)
+    def compute_q(self, observations, actions=None):
         # Compute Q-values using the Q-network
-        current_q_values = self.q_network(states).gather(
-            dim=-1, index=actions_argmax.unsqueeze(-1)).squeeze(-1)
-
-        # Use the target network for the next Q-values
-        with torch.no_grad():
-            next_q_values = self.q_network(next_states)
-            next_actions_argmax = torch.argmax(next_q_values, -1)
-
-            double_q_values = self.target_q_network(next_states).gather(
-                dim=-1, index=next_actions_argmax.unsqueeze(-1)).squeeze(-1)
-
-            td_targets = rewards + self.discount_factor * double_q_values * (1 - dones)
-            if isinstance(self.memory, PrioritizedReplayBuffer):
-                td_errors = current_q_values - td_targets
-
-        # Compute the loss and backpropagate
-        losses = self.huber_loss(current_q_values, td_targets)
-        if isinstance(self.memory, PrioritizedReplayBuffer):
-            # Calculate priorities for replay buffer $p_i = |\delta_i| + \epsilon$
-            new_priorities = np.abs(td_errors.cpu().numpy()) + 1e-6
-            # Update replay buffer priorities
-            self.memory.update_priorities(priorities['indexes'],
-                                          new_priorities)
-            loss = torch.mean(losses * priorities['weights'])
+        q_values = self.q_network(observations.to(self.device))
+        if actions is not None:
+            actions_argmax = actions.argmax(-1)
+            return q_values.gather(
+                dim=-1, index=actions_argmax.unsqueeze(-1)).squeeze(-1)
         else:
-            loss = torch.mean(losses)
+            return q_values
+
+    def compute_q_target(self, observations, actions=None):
+        # Compute Q-values using the target Q-network
+        q_values = self.target_q_network(observations.to(self.device))
+        if actions is not None:
+            actions_argmax = actions.argmax(-1)
+            return q_values.gather(
+                dim=-1, index=actions_argmax.unsqueeze(-1)).squeeze(-1)
+        else:
+            return q_values
+
+    def compute_ddqn_target(self, rewards, q_values, next_observations, discount_factor, dones):
+        with torch.no_grad():
+            next_q_values = self.compute_q(next_observations)
+            double_q_values = self.compute_q_target(next_observations,
+                                                    next_q_values)
+
+            td_targets = rewards + discount_factor * double_q_values * (
+                1 - dones)
+
+        return td_targets
+
+    def optimize(self, td_loss):
         self.optimizer.zero_grad()
-        loss.backward()
+        td_loss.backward()
         self.optimizer.step()
 
     def save(self, path):
@@ -146,15 +100,105 @@ class DDQNAgent:
             'optimizer_state_dict': self.optimizer.state_dict(),
         }, path)
 
-    def load(self, path):
+    def load(self, path, eval_only=False):
         checkpoint = torch.load(path)
         self.q_network.load_state_dict(checkpoint['q_network_state_dict'])
         self.target_q_network.load_state_dict(checkpoint['target_q_network_state_dict'])
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
-        # Ensure the models are in evaluation mode after loading
-        self.q_network.eval()
-        self.target_q_network.eval()
+        if eval_only:
+            # Ensure the models are in evaluation mode after loading
+            self.q_network.eval()
+            self.target_q_network.eval()
+
+
+class DDQNAgent:
+    BATCH_SIZE = 32
+
+    def __init__(self,
+                 state_shape,
+                 action_shape,
+                 approximator,
+                 discount_factor=0.99,
+                 epsilon_start=1.0,
+                 epsilon_end=0.01,
+                 epsilon_steps=500000,
+                 memory_buffer=None):
+        self.discount_factor = discount_factor
+        self.epsilon_start = epsilon_start
+        self.epsilon_end = epsilon_end
+        self.epsilon_decay = (epsilon_start - epsilon_end) / epsilon_steps
+        self.action_shape = action_shape[0]
+        # Q-networks
+        self.approximator = approximator
+        # Replay Buffer
+        self.memory = memory_buffer
+        self.update_epsilon(0)
+
+    @property
+    def is_prioritized(self):
+        return is_prioritized_memory(self.memory)
+
+    def select_action(self, state):
+        # Choose action using epsilon-greedy policy
+        if np.random.rand() < self.epsilon:
+            return np.random.randint(self.action_shape)  # Explore
+        else:
+            state_tensor = torch.tensor(state, dtype=torch.float32
+                                        ).unsqueeze(0)
+            with torch.no_grad():
+                q_values = self.approximator.compute_q(state_tensor
+                                                       ).cpu().numpy()
+            return np.argmax(q_values)  # Exploit
+
+    def update_epsilon(self, n_step):
+        # Anneal exploration rate
+        self.epsilon = max(self.epsilon_end,
+                           self.epsilon_start - (self.epsilon_decay * n_step))
+        if self.is_prioritized:
+            self.memory.update_beta(n_step)
+
+    def update_target(self):
+        self.approximator.update_target_network()
+
+    def update(self):
+        # Update the Q-network if replay buffer is sufficiently large
+        if len(self.memory) >= self.BATCH_SIZE:
+            sampled_data = self.memory.sample(
+                self.BATCH_SIZE, device=self.approximator.device)
+            self.update_approximator(sampled_data)
+
+    def update_approximator(self, sampled_data):
+        if self.is_prioritized:
+            (states, actions, rewards, next_states, dones
+             ), priorities = sampled_data
+        else:
+            states, actions, rewards, next_states, dones = sampled_data
+
+        # Compute Q-values using the approximator
+        q_values = self.approximator.compute_q(states, actions)
+        td_targets = self.approximator.compute_ddqn_target(
+            rewards, q_values, next_states, self.discount_factor, dones)
+
+        # Compute the loss and backpropagate
+        losses = self.approximator.loss_fn(q_values, td_targets)
+        if self.is_prioritized:
+            td_errors = q_values - td_targets
+            # Calculate priorities for replay buffer $p_i = |\delta_i| + \epsilon$
+            new_priorities = np.abs(td_errors.cpu().numpy()) + 1e-6
+            # Update replay buffer priorities
+            self.memory.update_priorities(priorities['indexes'],
+                                          new_priorities)
+            loss = torch.mean(losses * priorities['weights'])
+        else:
+            loss = torch.mean(losses)
+        self.approximator.optimize(loss)
+
+    def save(self, path):
+        self.approximator.save(path)
+
+    def load(self, path):
+        self.approximator.load(path, eval_only=True)
 
 
 # TODO: update for PrioritizedReplayBuffer

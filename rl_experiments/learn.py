@@ -14,13 +14,13 @@ import gym
 import datetime
 from pathlib import Path
 
-from uav_navigation.srl.agent import AEDDQNAgent
-from uav_navigation.srl.net import VectorApproximator
-from uav_navigation.srl.net import PixelApproximator
+from uav_navigation.srl.agent import SRLDDQNAgent
+from uav_navigation.srl.agent import SRLFunction
+from uav_navigation.srl.net import q_function
 
 from uav_navigation.agent import DDQNAgent
-from uav_navigation.net import QNetwork
-from uav_navigation.net import QFeaturesNetwork
+from uav_navigation.agent import QFunction
+from uav_navigation.net import QNetwork, QFeaturesNetwork
 
 from uav_navigation.utils import save_dict_json
 from uav_navigation.utils import run_agent
@@ -155,50 +155,67 @@ if __name__ == '__main__':
     if args.frame_stack > 1:
         env = gym.wrappers.FrameStack(env, num_stack=args.frame_stack)
 
-    agent_device = 'cuda'\
-        if torch.cuda.is_available() and args.use_cuda else 'cpu'
-
-    if args.is_srl:
-        agent_class = AEDDQNAgent
-        agent_approximator = PixelApproximator\
-            if args.is_pixels else VectorApproximator
-    else:
-        agent_class = DDQNAgent
-        agent_approximator = QFeaturesNetwork if args.is_pixels else QNetwork
-
     # Agent args
     agent_params = dict(
-        state_space_shape=env.observation_space.shape,
-        action_space_shape=(env.action_space.n, ),
-        device=agent_device,
-        approximator=agent_approximator,
-        approximator_lr=args.approximator_lr,
-        approximator_beta=args.approximator_beta,
-        approximator_tau=args.approximator_tau,
+        state_shape=env.observation_space.shape,
+        action_shape=(env.action_space.n, ),
         discount_factor=args.discount_factor,
         epsilon_start=args.epsilon_start,
         epsilon_end=args.epsilon_end,
         epsilon_steps=args.epsilon_steps,
     )
 
-    # Append SRL parameters
+    # Append SRL models
+    ae_models = dict()
+    approximator_params = dict(
+        learning_rate=args.approximator_lr,
+        adam_beta1=args.approximator_beta,
+        tau=args.approximator_tau,
+        use_cuda=args.use_cuda)
+
     if args.is_srl:
-        agent_params.update(dict(
+        agent_class = SRLDDQNAgent
+        q_approximator = SRLFunction
+        approximator_params['q_app_fn'] = q_function
+        approximator_params['q_app_params'] = dict(
             latent_dim=args.latent_dim,
+            action_shape=agent_params['action_shape'],
             hidden_dim=args.hidden_dim,
-            num_filters=args.num_filters,
-            num_layers=args.num_layers,
-            encoder_lr=args.encoder_lr,
-            decoder_lr=args.decoder_lr,
-            decoder_latent_lambda=args.decoder_latent_lambda,
-            decoder_weight_decay=args.decoder_weight_decay
-        ))
+            num_layers=args.num_layers)
+
+        if args.is_pixels:
+            ae_models['rgb'] = dict(state_shape=agent_params['state_shape'],
+                                    latent_dim=args.latent_dim,
+                                    num_layers=args.num_layers,
+                                    num_filters=args.num_filters,
+                                    encoder_lr=args.encoder_lr,
+                                    decoder_lr=args.decoder_lr,
+                                    decoder_weight_decay=args.decoder_weight_decay)
+        else:
+            ae_models['vector'] = dict(state_shape=agent_params['state_shape'],
+                                       hidden_dim=args.hidden_dim,
+                                       latent_dim=args.latent_dim,
+                                       num_layers=args.num_layers,
+                                       encoder_lr=args.encoder_lr,
+                                       decoder_lr=args.decoder_lr,
+                                       decoder_weight_decay=args.decoder_weight_decay)
+        agent_params['ae_models'] = ae_models
+    else:
+        agent_class = DDQNAgent
+        q_approximator = QFunction
+        approximator_params['q_app_fn'] = QFeaturesNetwork\
+            if args.is_pixels else QNetwork
+        approximator_params['q_app_params'] = dict(
+            input_shape=agent_params['state_shape'],
+            output_shape=agent_params['action_shape'])
+    agent_params.update(
+        dict(approximator=q_approximator(**approximator_params)))
 
     # Memory buffer args
     memory_params = dict(
         buffer_size=args.memory_capacity,
-        state_shape=agent_params['state_space_shape'],
-        action_shape=agent_params['action_space_shape'],
+        state_shape=agent_params['state_shape'],
+        action_shape=agent_params['action_shape'],
     )
     memory_class = ReplayBuffer
 
@@ -240,10 +257,14 @@ if __name__ == '__main__':
         eval_interval=args.eval_interval,
         eval_epsilon=args.eval_epsilon,
         outpath=outfolder)
+    # update data for log output
     run_params_save = run_params.copy()
     run_params_save.update(dict(
         seed=args.seed,
-        is_srl=args.is_srl))
+        is_srl=args.is_srl,
+        use_cuda=args.use_cuda))
+
+    agent_params.update(dict(approximator=approximator_params))
 
     save_dict_json(env_params, outfolder / 'args_environment.json')
     save_dict_json(agent_params, outfolder / 'args_agent.json')

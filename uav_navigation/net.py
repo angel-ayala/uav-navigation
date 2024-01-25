@@ -10,7 +10,7 @@ import torch.nn as nn
 
 
 class QNetwork(nn.Module):
-    def __init__(self, input_shape, output_shape, **kwargs):
+    def __init__(self, input_shape, output_shape):
         super(QNetwork, self).__init__()
         state_size = input_shape[0]
         action_size = output_shape[0]
@@ -33,7 +33,7 @@ class QNetwork(nn.Module):
 class QFeaturesNetwork(nn.Module):
     n_features = 512
 
-    def __init__(self, input_shape, output_shape, **kwargs):
+    def __init__(self, input_shape, output_shape):
         super().__init__()
 
         state_size = input_shape[0]
