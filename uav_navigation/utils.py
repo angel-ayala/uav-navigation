@@ -73,7 +73,7 @@ def run_agent(agent, env, training_steps, mem_steps, train_frequency,
               step_callback=None):
     ended = True
     total_reward = 0
-    total_episodes = 0
+    total_episodes = 1
     ep_reward = 0
     ep_steps = 0
     timemark = time.time()
@@ -91,30 +91,13 @@ def run_agent(agent, env, training_steps, mem_steps, train_frequency,
         elapsed_time = time.time() - timemark
         membar.clear()
         del membar
+        print(f"Memory fill at {elapsed_time:.3f} seconds")
+        ended = True
 
-    tbar = tqdm(range(eval_interval), desc='Episode 0', leave=False,
-                unit='step', bar_format='{desc}{n:04d}|{bar}|[{rate_fmt}]')
+    tbar = tqdm(range(eval_interval), desc=f"Episode {total_episodes:03d}",
+                leave=False, unit='step',
+                bar_format='{desc}: {n:04d}|{bar}|[{rate_fmt}]')
     for step in range(training_steps):
-        # after training steps, began evaluation
-        if step % eval_interval == 0:
-            elapsed_time = time.time() - timemark
-            tbar.clear()
-            if total_episodes == 0:
-                print(f"Memory fill at {elapsed_time:.3f} seconds")
-            else:
-                print(f"Episode {total_episodes:03d}\n- Learning: {elapsed_time:.3f} seconds\tR: {ep_reward:.4f}\tS: {ep_steps}")
-            agent.save(outpath / f"agent_ep_{total_episodes:03d}")
-            eval_reward, eval_steps, eval_time = evaluate_agent(
-                agent, env, eval_epsilon, step_callback)
-            total_episodes += 1
-            total_reward += ep_reward
-            tbar.reset()
-            tbar.set_description(f"Episode {total_episodes:03d}")
-            ended = True
-            if step_callback:
-                step_callback.new_episode()
-            timemark = time.time()
-
         if ended:
             ep_reward = 0
             ep_steps = 0
@@ -122,6 +105,7 @@ def run_agent(agent, env, training_steps, mem_steps, train_frequency,
             if step_callback:
                 step_callback.set_init_state(state, info)
                 step_callback.set_learning()
+
         action, reward, next_state, ended = do_step(
             agent, env, state, step_callback, must_remember=True)
 
@@ -137,11 +121,28 @@ def run_agent(agent, env, training_steps, mem_steps, train_frequency,
 
         agent.update_epsilon(step)
         tbar.update(1)
+        # after training steps, began evaluation
+        if (step + 1) % eval_interval == 0:
+            elapsed_time = time.time() - timemark
+            tbar.clear()
+            print(f"Episode {total_episodes:03d}\n- Learning: {elapsed_time:.3f} seconds\tR: {ep_reward:.4f}\tS: {ep_steps}")
+            agent.save(outpath / f"agent_ep_{total_episodes:03d}")
+            eval_reward, eval_steps, eval_time = evaluate_agent(
+                agent, env, eval_epsilon, step_callback)
+            total_episodes += 1
+            total_reward += ep_reward
+            tbar.reset()
+            tbar.set_description(f"Episode {total_episodes:03d}")
+            ended = True
+            if step_callback:
+                step_callback.new_episode()
+            timemark = time.time()
 
     return total_reward, total_episodes
 
 
 def evaluate_agent(agent, env, eval_epsilon, step_callback=None):
+    timemark = time.time()
     state, info = env.reset()
     ep_reward = 0
     ep_steps = 0
@@ -153,7 +154,6 @@ def evaluate_agent(agent, env, eval_epsilon, step_callback=None):
         step_callback.set_init_state(state, info)
         step_callback.set_eval()
 
-    timemark = time.time()
     while not end:
         action, reward, next_state, end = do_step(
             agent, env, state, step_callback, must_remember=False)

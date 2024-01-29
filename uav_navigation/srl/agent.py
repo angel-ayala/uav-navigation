@@ -61,7 +61,8 @@ class SRLFunction(QFunction):
         is_vector = False
         for m in self.models:
             is_rgb = m.type == 'rgb' or is_rgb
-            is_vector = m.type == 'vector' or m.type == 'imu2pose' or is_rgb
+            is_vector = m.type == 'vector' or m.type == 'imu2pose' or is_vector
+
         self.is_multimodal = is_rgb and is_vector
 
     def append_autoencoder(self, ae_model,
