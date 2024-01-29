@@ -49,20 +49,28 @@ def preprocess_obs(obs, bits=5):
     return obs
 
 
-def rgb_reconstruction_model(state_shape, latent_dim, num_layers=2,
+def rgb_reconstruction_model(image_shape, latent_dim, num_layers=2,
                              num_filters=32):
-    encoder = PixelEncoder(state_shape, latent_dim, num_layers=num_layers,
+    encoder = PixelEncoder(image_shape, latent_dim, num_layers=num_layers,
                            num_filters=num_filters)
-    decoder = PixelDecoder(state_shape, latent_dim, num_layers=num_layers,
+    decoder = PixelDecoder(image_shape, latent_dim, num_layers=num_layers,
                            num_filters=num_filters)
     return encoder, decoder
 
 
-def vector_reconstruction_model(state_shape, hidden_dim, latent_dim,
+def vector_reconstruction_model(vector_shape, hidden_dim, latent_dim,
                                 num_layers=2):
-    encoder = MLP(state_shape[0], latent_dim, hidden_dim, num_layers=num_layers)
-    decoder = MLP(latent_dim, state_shape[0], hidden_dim, num_layers=num_layers)
+    encoder = MLP(vector_shape[0], latent_dim, hidden_dim, num_layers=num_layers)
+    decoder = MLP(latent_dim, vector_shape[0], hidden_dim, num_layers=num_layers)
     return encoder, decoder
+
+
+def imu2pose_model(imu_shape, pos_shape, hidden_dim, latent_dim,
+                   num_layers=2):
+    encoder = MLP(imu_shape[0], latent_dim, hidden_dim, num_layers=num_layers)
+    decoder1 = MLP(latent_dim, imu_shape[0], hidden_dim, num_layers=num_layers)
+    decoder2 = MLP(latent_dim, pos_shape[0], hidden_dim, num_layers=num_layers)
+    return encoder, (decoder1, decoder2)
 
 def q_function(latent_dim, action_shape, hidden_dim, num_layers=2):
     return MLP(latent_dim, action_shape[0], hidden_dim, num_layers=num_layers)
@@ -74,7 +82,7 @@ class MLP(nn.Module):
     def __init__(self, n_input, n_output, hidden_dim, num_layers=2):
         super().__init__()
 
-        self.feature_dim = n_output
+        # self.feature_dim = n_output
         self.num_layers = num_layers
         self.h_layers = nn.ModuleList([nn.Linear(n_input, hidden_dim)])
         for i in range(num_layers - 1):

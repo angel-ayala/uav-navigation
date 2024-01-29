@@ -12,21 +12,30 @@ def is_prioritized_memory(memory):
 
 
 class ReplayBuffer:
-    def __init__(self, buffer_size, state_shape, action_shape):
+    def __init__(self, buffer_size, obs_shape, action_shape,
+                 is_multimodal=False):
+        self.is_multimodal = is_multimodal
         self.buffer_size = buffer_size
-        self.state_shape = state_shape
         self.action_shape = action_shape
+        self.obs_shape = obs_shape
         self.clear()
 
-    def add(self, state, action, reward, next_state, done):
-        self.states[self.index] = state
+    def add(self, observation, action, reward, next_obs, done):
+        if self.is_multimodal:
+            self.observations1[self.index] = observation[0]
+            self.observations2[self.index] = observation[1]
+            self.next_obs1[self.index] = next_obs[0]
+            self.next_obs2[self.index] = next_obs[1]
+        else:
+            self.observations[self.index] = observation
+            self.next_obs[self.index] = next_obs
+
         if type(action) == list:
             self.actions[self.index] = action
         else:
             dims = (self.action_shape[0], self.action_shape[0])
             self.actions[self.index] = np.eye(*dims)[action]
         self.rewards[self.index] = reward
-        self.next_states[self.index] = next_state
         self.dones[self.index] = done
 
         self.index = (self.index + 1) % self.buffer_size
@@ -34,21 +43,44 @@ class ReplayBuffer:
 
     def sample(self, batch_size, device=None):
         indices = np.random.choice(self.size, batch_size, replace=False)
+        return self.get_indices(indices, device=device)
 
-        states = self.states[indices]
+    def get_indices(self, indices, device=None):
+
         actions = self.actions[indices]
         rewards = self.rewards[indices]
-        next_states = self.next_states[indices]
         dones = self.dones[indices]
 
-        if device is None:
-            return states, actions, rewards, next_states, dones
+        if self.is_multimodal:
+            observations = (self.observations1[indices],
+                            self.observations2[indices])
+            next_obs = (self.next_obs1[indices], self.next_obs2[indices])
         else:
+            observations = self.observations[indices]
+            next_obs = self.next_obs[indices]
+
+        if device is None:
+            return observations, actions, rewards, next_obs, dones
+        else:
+            if self.is_multimodal:
+                obs_tensor = (torch.tensor(
+                    observations[0], dtype=torch.float32).to(device),
+                    torch.tensor(
+                        observations[1], dtype=torch.float32).to(device))
+                next_obs_tensor = (torch.tensor(
+                    next_obs[0], dtype=torch.float32).to(device),
+                    torch.tensor(
+                        next_obs[1], dtype=torch.float32).to(device))
+            else:
+                obs_tensor = torch.tensor(observations,
+                                          dtype=torch.float32).to(device)
+                next_obs_tensor = torch.tensor(next_obs,
+                                          dtype=torch.float32).to(device)
             return (
-                torch.tensor(states, dtype=torch.float32).to(device),
+                obs_tensor,
                 torch.tensor(actions, dtype=torch.float32).to(device),
                 torch.tensor(rewards, dtype=torch.float32).to(device),
-                torch.tensor(next_states, dtype=torch.float32).to(device),
+                next_obs_tensor,
                 torch.tensor(dones, dtype=torch.float32).to(device)
             )
 
@@ -56,12 +88,25 @@ class ReplayBuffer:
         return self.size
 
     def clear(self):
-        state_shape = self.buffer_size, *self.state_shape
+        if self.is_multimodal:
+            self.observations1 = np.zeros(
+                (self.buffer_size, *self.obs_shape[0]), dtype=np.float32)
+            self.observations2 = np.zeros(
+                (self.buffer_size, *self.obs_shape[1]), dtype=np.float32)
+
+            self.next_obs1 = np.zeros(
+                (self.buffer_size, *self.obs_shape[0]), dtype=np.float32)
+            self.next_obs2 = np.zeros(
+                (self.buffer_size, *self.obs_shape[1]), dtype=np.float32)
+        else:
+            self.observations = np.zeros(
+                (self.buffer_size, *self.obs_shape), dtype=np.float32)
+            self.next_obs = np.zeros(
+                (self.buffer_size, *self.obs_shape), dtype=np.float32)
+
         action_shape = self.buffer_size, *self.action_shape
-        self.states = np.zeros(state_shape, dtype=np.float32)
         self.actions = np.zeros(action_shape, dtype=np.float32)
         self.rewards = np.zeros((self.buffer_size,), dtype=np.float32)
-        self.next_states = np.zeros(state_shape, dtype=np.float32)
         self.dones = np.zeros((self.buffer_size,), dtype=np.float32)
         self.index = 0
         self.size = 0
@@ -143,9 +188,10 @@ class PrioritizedReplayBuffer(ReplayBuffer):
     We use the same structure to compute the minimum.
     """
 
-    def __init__(self, buffer_size, state_shape, action_shape, alpha=0.6,
-                 beta=0.4, beta_steps=250):
-        super().__init__(buffer_size, state_shape, action_shape)
+    def __init__(self, buffer_size, obs_shape, action_shape,
+                 is_multimodal=False, alpha=0.6, beta=0.4, beta_steps=250):
+        super().__init__(buffer_size, obs_shape, action_shape,
+                         is_multimodal=is_multimodal)
         # $\alpha$
         self.alpha = alpha
         self.beta_start = beta
@@ -260,28 +306,14 @@ class PrioritizedReplayBuffer(ReplayBuffer):
             samples['weights'][i] = weight / max_weight
 
         # Get samples data
-        # for k, v in self.data.items():
-        #     samples[k] = v[samples['indexes']]
-
-        # return samples
-        states = self.states[samples['indexes']]
-        actions = self.actions[samples['indexes']]
-        rewards = self.rewards[samples['indexes']]
-        next_states = self.next_states[samples['indexes']]
-        dones = self.dones[samples['indexes']]
+        sampled_data = self.get_indices(samples['indexes'], device=device)
 
         if device is None:
-            return (states, actions, rewards, next_states, dones), samples
+            return sampled_data, samples
         else:
             samples['weights'] = torch.tensor(samples['weights'],
                                               dtype=torch.float32).to(device)
-            return (
-                torch.tensor(states, dtype=torch.float32).to(device),
-                torch.tensor(actions, dtype=torch.float32).to(device),
-                torch.tensor(rewards, dtype=torch.float32).to(device),
-                torch.tensor(next_states, dtype=torch.float32).to(device),
-                torch.tensor(dones, dtype=torch.float32).to(device)
-            ), samples
+            return sampled_data, samples
 
     def update_priorities(self, indexes, priorities):
         for idx, priority in zip(indexes, priorities):

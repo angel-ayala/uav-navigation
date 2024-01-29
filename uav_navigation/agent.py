@@ -59,7 +59,12 @@ class QFunction:
 
     def compute_q(self, observations, actions=None):
         # Compute Q-values using the Q-network
-        q_values = self.q_network(observations.to(self.device))
+        if type(observations) is not torch.Tensor:
+            obs_tensor = torch.tensor(observations, dtype=torch.float32
+                                      ).unsqueeze(0)
+        else:
+            obs_tensor = observations
+        q_values = self.q_network(obs_tensor.to(self.device))
         if actions is not None:
             actions_argmax = actions.argmax(-1)
             return q_values.gather(
@@ -69,7 +74,12 @@ class QFunction:
 
     def compute_q_target(self, observations, actions=None):
         # Compute Q-values using the target Q-network
-        q_values = self.target_q_network(observations.to(self.device))
+        if type(observations) is not torch.Tensor:
+            obs_tensor = torch.tensor(observations, dtype=torch.float32
+                                      ).unsqueeze(0)
+        else:
+            obs_tensor = observations
+        q_values = self.target_q_network(obs_tensor.to(self.device))
         if actions is not None:
             actions_argmax = actions.argmax(-1)
             return q_values.gather(
@@ -144,11 +154,8 @@ class DDQNAgent:
         if np.random.rand() < self.epsilon:
             return np.random.randint(self.action_shape)  # Explore
         else:
-            state_tensor = torch.tensor(state, dtype=torch.float32
-                                        ).unsqueeze(0)
             with torch.no_grad():
-                q_values = self.approximator.compute_q(state_tensor
-                                                       ).cpu().numpy()
+                q_values = self.approximator.compute_q(state).cpu().numpy()
             return np.argmax(q_values)  # Exploit
 
     def update_epsilon(self, n_step):
@@ -224,7 +231,7 @@ class DoubleDuelingQAgent(DDQNAgent):
                          approximator_lr, approximator_beta, approximator_tau,
                          discount_factor, epsilon_start, epsilon_end, epsilon_decay,
                          buffer_capacity, latent_dim, hidden_dim, num_layers, num_filters)
-        
+
         # Q-networks
         self.q_network = approximator(
             state_space_shape, action_space_shape,

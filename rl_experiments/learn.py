@@ -24,10 +24,10 @@ from uav_navigation.net import QNetwork, QFeaturesNetwork
 
 from uav_navigation.utils import save_dict_json
 from uav_navigation.utils import run_agent
-from uav_navigation.utils import PreprocessObservation
 from uav_navigation.memory import ReplayBuffer, PrioritizedReplayBuffer
 
 
+from webots_drone.envs.preprocessor import MultiModalObservation
 from webots_drone.data import StoreStepData
 
 
@@ -55,7 +55,11 @@ def parse_args():
     arg_env.add_argument("--target-dim", type=list[float], default=[7., 3.5],
                          help="Target's dimension size.")
     arg_env.add_argument("--is-pixels", action='store_true',
-                         help='Whether if state is image-based or vector-based.')
+                         help='Whether if reconstruct an image-based observation.')
+    arg_env.add_argument("--is-vector", action='store_true',
+                         help='Whether if reconstruct a vector-based observation.')
+    arg_env.add_argument("--is-pose", action='store_true',
+                         help='Whether if reconstruct the pose observation.')
 
     arg_agent = parser.add_argument_group('Agent')
     arg_agent.add_argument("--approximator-lr", type=float, default=25e-5,
@@ -135,6 +139,10 @@ if __name__ == '__main__':
 
     # Environment args
     environment_name = 'webots_drone:webots_drone/DroneEnvDiscrete-v0'
+    is_multimodal = args.is_pixels and (args.is_vector or args.is_pose)
+    if is_multimodal:
+        assert args.is_pixels == is_multimodal, "multimodal requires --is-pixels and --is-vector or --is-pose flags"
+
     env_params = dict(
         time_limit_seconds=args.time_limit,  # 1 min
         max_no_action_seconds=args.time_no_action,  # 5 sec
@@ -150,14 +158,26 @@ if __name__ == '__main__':
     env = gym.make(environment_name, **env_params)
 
     # Observation preprocessing
-    env = PreprocessObservation(env, is_pixels=args.is_pixels)
+    rgb_shape = (3, 84, 84)
+    vector_shape = (22, )
     env_params['frame_stack'] = args.frame_stack
-    if args.frame_stack > 1:
+    env_params['is_multimodal'] = is_multimodal
+    state_shape = rgb_shape if args.is_pixels else vector_shape
+
+    if is_multimodal:
+        env = MultiModalObservation(env,
+                                    shape1=rgb_shape,
+                                    shape2=vector_shape,
+                                    frame_stack=args.frame_stack)
+        state_shape = (env.observation_space[0].shape,
+                       env.observation_space[1].shape)
+
+    if args.frame_stack > 1 and not is_multimodal:
         env = gym.wrappers.FrameStack(env, num_stack=args.frame_stack)
 
     # Agent args
     agent_params = dict(
-        state_shape=env.observation_space.shape,
+        state_shape=state_shape,
         action_shape=(env.action_space.n, ),
         discount_factor=args.discount_factor,
         epsilon_start=args.epsilon_start,
@@ -184,21 +204,35 @@ if __name__ == '__main__':
             num_layers=args.num_layers)
 
         if args.is_pixels:
-            ae_models['rgb'] = dict(state_shape=agent_params['state_shape'],
+            image_shape = agent_params['state_shape'][0] if is_multimodal else agent_params['state_shape']
+            ae_models['rgb'] = dict(image_shape=image_shape,
                                     latent_dim=args.latent_dim,
                                     num_layers=args.num_layers,
                                     num_filters=args.num_filters,
                                     encoder_lr=args.encoder_lr,
                                     decoder_lr=args.decoder_lr,
                                     decoder_weight_decay=args.decoder_weight_decay)
-        else:
-            ae_models['vector'] = dict(state_shape=agent_params['state_shape'],
+        if args.is_vector:
+            vector_shape = agent_params['state_shape'][1] if is_multimodal else agent_params['state_shape']
+            ae_models['vector'] = dict(vector_shape=vector_shape,
                                        hidden_dim=args.hidden_dim,
                                        latent_dim=args.latent_dim,
                                        num_layers=args.num_layers,
                                        encoder_lr=args.encoder_lr,
                                        decoder_lr=args.decoder_lr,
                                        decoder_weight_decay=args.decoder_weight_decay)
+        if args.is_pose:
+            ae_models['imu2pose'] = dict(imu_shape=(6, ),
+                                         pos_shape=(6, ),
+                                         hidden_dim=args.hidden_dim,
+                                         latent_dim=args.latent_dim,
+                                         num_layers=args.num_layers,
+                                         encoder_lr=args.encoder_lr,
+                                         decoder_lr=[args.decoder_lr,
+                                                     args.decoder_lr],
+                                         decoder_weight_decay=args.decoder_weight_decay)
+        approximator_params['q_app_params']['latent_dim'] *= len(
+            ae_models.keys())
         agent_params['ae_models'] = ae_models
     else:
         agent_class = DDQNAgent
@@ -214,8 +248,9 @@ if __name__ == '__main__':
     # Memory buffer args
     memory_params = dict(
         buffer_size=args.memory_capacity,
-        state_shape=agent_params['state_shape'],
+        obs_shape=agent_params['state_shape'],
         action_shape=agent_params['action_shape'],
+        is_multimodal=is_multimodal
     )
     memory_class = ReplayBuffer
 
@@ -238,6 +273,7 @@ if __name__ == '__main__':
     if args.logspath is None:
         path_prefix = 'drone_pixels' if args.is_pixels else 'drone_vector'
         path_suffix = '-srl' if args.is_srl else ''
+        path_suffix += '-multi' if is_multimodal else ''
         timestamp = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
         # Summary folder
         outfolder = Path(f"logs_{path_prefix}/ddqn{path_suffix}_{timestamp}")
@@ -261,13 +297,14 @@ if __name__ == '__main__':
     run_params_save = run_params.copy()
     run_params_save.update(dict(
         seed=args.seed,
-        is_srl=args.is_srl,
         use_cuda=args.use_cuda))
 
     agent_params.update(dict(approximator=approximator_params))
+    agent_params_save = agent_params.copy()
+    agent_params_save.update(dict(is_srl=args.is_srl))
 
     save_dict_json(env_params, outfolder / 'args_environment.json')
-    save_dict_json(agent_params, outfolder / 'args_agent.json')
+    save_dict_json(agent_params_save, outfolder / 'args_agent.json')
     save_dict_json(run_params_save, outfolder / 'args_training.json')
 
     run_agent(agent, env, step_callback=store_callback, **run_params)
