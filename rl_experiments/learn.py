@@ -24,7 +24,6 @@ from uav_navigation.net import QFeaturesNetwork
 
 from uav_navigation.utils import save_dict_json
 from uav_navigation.utils import run_agent
-from uav_navigation.utils import PreprocessObservation
 from uav_navigation.memory import ReplayBuffer, PrioritizedReplayBuffer
 
 
@@ -148,12 +147,14 @@ if __name__ == '__main__':
 
     # Create the environment
     env = gym.make(environment_name, **env_params)
+    state_shape = env.observation_space.shape if args.is_pixels else (13, )
 
     # Observation preprocessing
-    env = PreprocessObservation(env, is_pixels=args.is_pixels)
     env_params['frame_stack'] = args.frame_stack
     if args.frame_stack > 1:
         env = gym.wrappers.FrameStack(env, num_stack=args.frame_stack)
+        state_shape = env.observation_space.shape\
+            if args.is_pixels else (args.frame_stack, 13)
 
     agent_device = 'cuda'\
         if torch.cuda.is_available() and args.use_cuda else 'cpu'
@@ -168,7 +169,7 @@ if __name__ == '__main__':
 
     # Agent args
     agent_params = dict(
-        state_space_shape=env.observation_space.shape,
+        state_space_shape=state_shape,
         action_space_shape=(env.action_space.n, ),
         device=agent_device,
         approximator=agent_approximator,

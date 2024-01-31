@@ -22,7 +22,7 @@ class QNetwork(nn.Module):
         self.leaky_relu = nn.LeakyReLU()
 
     def forward(self, x):
-        x = self.leaky_relu(self.fc1(x))
+        x = self.leaky_relu(self.fc1(x[:, :13]))
         x = torch.relu(self.fc2(x))
         x = torch.relu(self.fc3(x))
         x = self.drop(x)
