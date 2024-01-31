@@ -15,7 +15,7 @@ class ReplayBuffer:
         self.clear()
 
     def add(self, state, action, reward, next_state, done):
-        self.states[self.index] = states[:13]
+        self.states[self.index] = state[:13]
         if type(action) == list:
             self.actions[self.index] = action
         else:
