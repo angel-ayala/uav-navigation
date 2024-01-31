@@ -71,7 +71,7 @@ def parse_args():
                            help='Final epsilon value for exploration.')
     arg_agent.add_argument("--epsilon-steps", type=int, default=500000,
                            help='Number of steps to reach minimum value for Epsilon.')
-    arg_agent.add_argument("--memory-capacity", type=int, default=2048,
+    arg_agent.add_argument("--memory-capacity", type=int, default=131072,  # 2**17
                            help='Maximum number of transitions in the Experience replay buffer.')
     arg_agent.add_argument("--memory-prioritized", action='store_true',
                            help='Whether if memory buffer is Prioritized experiencie replay or not.')
