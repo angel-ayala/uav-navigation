@@ -15,14 +15,14 @@ class ReplayBuffer:
         self.clear()
 
     def add(self, state, action, reward, next_state, done):
-        self.states[self.index] = state
+        self.states[self.index] = states[:13]
         if type(action) == list:
             self.actions[self.index] = action
         else:
             dims = (self.action_shape[0], self.action_shape[0])
             self.actions[self.index] = np.eye(*dims)[action]
         self.rewards[self.index] = reward
-        self.next_states[self.index] = next_state
+        self.next_states[self.index] = next_state[:13]
         self.dones[self.index] = done
 
         self.index = (self.index + 1) % self.buffer_size
