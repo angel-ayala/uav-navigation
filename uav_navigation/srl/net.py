@@ -72,7 +72,7 @@ class VectorApproximator(nn.Module):
 
     def forward(self, obs, detach_encoder=False):
         # detach_encoder allows to stop gradient propogation to encoder
-        z = self.encoder(obs, detach=detach_encoder)
+        z = self.encoder(obs[:, :13], detach=detach_encoder)
         q = self.Q(z)
 
         return q

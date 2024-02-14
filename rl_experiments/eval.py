@@ -30,7 +30,7 @@ from webots_drone.data import StoreStepData
 
 
 def parse_args():
-    parser = argparse.ArgumentParser()    # misc´
+    parser = argparse.ArgumentParser()    # misc
     parser.add_argument('--seed', type=int, default=666)
     parser.add_argument('--logspath', type=str,
                         default='logs/ddqn-srl_2023-11-28_00-13-33',

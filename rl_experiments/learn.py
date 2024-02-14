@@ -30,6 +30,16 @@ from uav_navigation.memory import ReplayBuffer, PrioritizedReplayBuffer
 from webots_drone.data import StoreStepData
 
 
+def list_of_float(arg):
+    return list(map(float, arg.split(',')))
+
+
+def xy_coordinates(arg):
+    if arg.lower() == 'random':
+        return None
+    return list_of_float(arg)
+
+
 def parse_args():
     # Argument parser
     parser = argparse.ArgumentParser()
@@ -47,11 +57,11 @@ def parse_args():
                          help='Minimum distance from the target.')
     arg_env.add_argument("--init-altitude", type=float, default=25.,
                          help='Minimum height distance to begin the mission.')
-    arg_env.add_argument("--altitude-limits", type=list[float],
+    arg_env.add_argument("--altitude-limits", type=list_of_float,
                          default=[11., 75.], help='Vertical flight limits.')
-    arg_env.add_argument("--target-pos", type=list[float], default=[-40., 40.],
+    arg_env.add_argument("--target-pos", type=xy_coordinates, default=[-40., 40.],
                          help='Initial position of the target.')
-    arg_env.add_argument("--target-dim", type=list[float], default=[7., 3.5],
+    arg_env.add_argument("--target-dim", type=list_of_float, default=[7., 3.5],
                          help="Target's dimension size.")
     arg_env.add_argument("--is-pixels", action='store_true',
                          help='Whether if state is image-based or vector-based.')
