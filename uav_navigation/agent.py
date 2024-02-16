@@ -74,8 +74,9 @@ class DDQNAgent:
         if np.random.rand() < self.epsilon:
             return np.random.randint(self.action_space_size)  # Explore
         else:
-            state_tensor = torch.tensor(
-                state, dtype=torch.float32, device=self.device).unsqueeze(0)
+            state_tensor = torch.tensor(np.array(state), 
+                                        dtype=torch.float32,
+                                        device=self.device).unsqueeze(0)
             with torch.no_grad():
                 q_values = self.q_network(state_tensor).cpu().numpy()
             return np.argmax(q_values)  # Exploit

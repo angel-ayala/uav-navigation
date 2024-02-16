@@ -171,30 +171,23 @@ def evaluate_agent(agent, env, eval_epsilon, step_callback=None):
     return ep_reward, ep_steps, elapsed_time
 
 
-class PreprocessObservation(gym.Wrapper):
-    def __init__(self, env: gym.Env, is_pixels=True):
+class ReducedVectorObservation(gym.Wrapper):
+    def __init__(self, env: gym.Env):
         super().__init__(env)
-        if is_pixels:
-            self.preprocess_fn = self.preprocess_pixels
-        else:
-            self.preprocess_fn = self.preprocess_vector
+        self.obs_shape = (13, )
+        self.obs_type = np.float32
+        self.observation_space = gym.spaces.Box(low=float('-inf'),
+                                                high=float('inf'),
+                                                shape=self.obs_shape,
+                                                dtype=self.obs_type)
+    def observation(self, obs):
+        return obs[:13]
 
     def step(self, action):
         obs, rews, terminateds, truncateds, infos = self.env.step(action)
-        return self.preprocess_fn(obs), rews, terminateds, truncateds, infos
+        return self.observation(obs), rews, terminateds, truncateds, infos
 
     def reset(self, **kwargs):
-        """Resets the environment and normalizes the observation."""
         obs, info = self.env.reset(**kwargs)
 
-        return self.preprocess_fn(obs), info
-
-    def preprocess_pixels(self, obs):
-        return obs.astype(np.float32) / 255.
-
-    def preprocess_vector(self, obs):
-        # Normalize angular values
-        obs[3] = min_max_norm(obs[3], a=-1, b=1, minx=-np.pi, maxx=np.pi)
-        obs[4] = min_max_norm(obs[4], a=-1, b=1, minx=-np.pi/2, maxx=np.pi/2)
-        obs[5] = min_max_norm(obs[5], a=-1, b=1, minx=-np.pi, maxx=np.pi)
-        return obs
+        return self.observation(obs), info

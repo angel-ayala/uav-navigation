@@ -12,9 +12,12 @@ import torch.nn as nn
 class QNetwork(nn.Module):
     def __init__(self, input_shape, output_shape, **kwargs):
         super(QNetwork, self).__init__()
-        state_size = input_shape[0]
+        state_size = input_shape[-1]
         action_size = output_shape[0]
-        self.fc1 = nn.Linear(state_size, 32)
+        if len(input_shape) == 2:
+            self.conv1 = nn.Conv1d(input_shape[0], 32, kernel_size=state_size)
+        else:
+            self.fc1 = nn.Linear(state_size, 32)
         self.fc2 = nn.Linear(32, 64)
         self.fc3 = nn.Linear(64, 512)
         self.out = nn.Linear(512, action_size)
@@ -22,7 +25,12 @@ class QNetwork(nn.Module):
         self.leaky_relu = nn.LeakyReLU()
 
     def forward(self, x):
-        x = self.leaky_relu(self.fc1(x[:, :13]))
+        if hasattr(self, 'conv1'):
+            x = self.conv1(x)
+            x = x.squeeze(2)
+        else:
+            x = self.fc1(x)
+        x = self.leaky_relu(x)
         x = torch.relu(self.fc2(x))
         x = torch.relu(self.fc3(x))
         x = self.drop(x)

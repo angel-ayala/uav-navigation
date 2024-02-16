@@ -35,16 +35,22 @@ class MLP(nn.Module):
 
     def __init__(self, n_input, n_output, hidden_dim, num_layers=2):
         super().__init__()
-
         self.feature_dim = n_output
         self.num_layers = num_layers
-        self.h_layers = nn.ModuleList([nn.Linear(n_input, hidden_dim)])
+        if type(n_input) != int and len(n_input) == 2:
+            first_layer = nn.Conv1d(n_input[0], hidden_dim,
+                                    kernel_size=n_input[-1])
+        else:
+            first_layer = nn.Linear(n_input, hidden_dim)
+        self.h_layers = nn.ModuleList([first_layer])
         for i in range(num_layers - 1):
             self.h_layers.append(nn.Linear(hidden_dim, hidden_dim))
         self.h_layers.append(nn.Linear(hidden_dim, n_output))
 
     def forward(self, obs, detach=False):
         h = self.h_layers[0](obs)
+        if isinstance(self.h_layers[0], nn.Conv1d):
+            h = h.squeeze(2)
         for i in range(self.num_layers):
             h = torch.relu(self.h_layers[i+1](h))
 
@@ -62,17 +68,15 @@ class VectorApproximator(nn.Module):
                  hidden_dim=256,
                  feature_dim=50):
         super().__init__()
-
         n_output = output_shape[0]
-        n_input = input_shape[0]
-        self.encoder = MLP(n_input, feature_dim, hidden_dim,
+        self.encoder = MLP(input_shape, feature_dim, hidden_dim,
                            num_layers=num_layers)
         self.Q = MLP(feature_dim, n_output, hidden_dim,
                      num_layers=num_layers)
 
     def forward(self, obs, detach_encoder=False):
         # detach_encoder allows to stop gradient propogation to encoder
-        z = self.encoder(obs[:, :13], detach=detach_encoder)
+        z = self.encoder(obs, detach=detach_encoder)
         q = self.Q(z)
 
         return q
