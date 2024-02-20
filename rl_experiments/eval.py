@@ -24,7 +24,7 @@ from uav_navigation.agent import profile_agent
 
 from uav_navigation.utils import load_json_dict
 from uav_navigation.utils import evaluate_agent
-from uav_navigation.utils import PreprocessObservation
+from uav_navigation.utils import ReducedVectorObservation
 
 from webots_drone.data import StoreStepData
 
@@ -60,7 +60,8 @@ def run_evaluation(seed_val, logpath, episode):
     del env_params['frame_stack']
     # Create the environment
     env = gym.make(environment_name, **env_params)
-    env = PreprocessObservation(env, is_pixels=env_params['is_pixels'])
+    if not env_params['is_pixels']:
+        env = ReducedVectorObservation(env)
     if frame_stack > 1:
         env = gym.wrappers.FrameStack(env, num_stack=frame_stack)
 

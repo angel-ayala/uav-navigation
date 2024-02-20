@@ -13,6 +13,7 @@ from thop import clever_format
 from .utils import soft_update_params
 from .utils import profile_model
 from .memory import PrioritizedReplayBuffer
+from .logger import summary_scalar
 
 
 def profile_agent(agent, state_space_shape, action_space_shape):
@@ -85,6 +86,7 @@ class DDQNAgent:
         # Anneal exploration rate
         self.epsilon = max(self.epsilon_end,
                            self.epsilon_start - (self.epsilon_decay * n_step))
+        summary_scalar('Agent/Epsilon', self.epsilon)
         if isinstance(self.memory, PrioritizedReplayBuffer):
             self.memory.update_beta(n_step)
 
@@ -136,6 +138,7 @@ class DDQNAgent:
             loss = torch.mean(losses * priorities['weights'])
         else:
             loss = torch.mean(losses)
+        summary_scalar('Loss/Q-value', loss.item())
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()

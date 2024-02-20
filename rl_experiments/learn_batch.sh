@@ -9,5 +9,15 @@ python learn.py --memory-prioritized --is-srl
 python learn.py --memory-prioritized --is-srl --is-pixels --use-cuda
 
 # DDQN DEBUG
-python learn.py --steps 1000 --eval-interval 100 --epsilon-steps 500 --memory-steps 64 --target-update-frequency 10 \
---is-pixels --is-srl --use-cuda
+python learn.py \
+--steps 1000 \
+--eval-interval 100 \
+--epsilon-steps 500 \
+--target-update-frequency 10 \
+--memory-capacity 128 \
+--memory-steps 32 \
+--memory-prioritized \
+--target-pos random \
+--frame-stack 3 \
+--is-pixels --use-cuda \
+--is-srl

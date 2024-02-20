@@ -45,14 +45,23 @@ class MLP(nn.Module):
         self.h_layers = nn.ModuleList([first_layer])
         for i in range(num_layers - 1):
             self.h_layers.append(nn.Linear(hidden_dim, hidden_dim))
-        self.h_layers.append(nn.Linear(hidden_dim, n_output))
+        if type(n_output) != int and len(n_output) == 2:
+            last_layer = nn.ConvTranspose1d(hidden_dim, n_output[0],
+                                            kernel_size=n_output[-1])
+        else:
+            last_layer = nn.Linear(hidden_dim, n_output)
+
+        self.h_layers.append(last_layer)
 
     def forward(self, obs, detach=False):
         h = self.h_layers[0](obs)
         if isinstance(self.h_layers[0], nn.Conv1d):
             h = h.squeeze(2)
         for i in range(self.num_layers):
-            h = torch.relu(self.h_layers[i+1](h))
+            layer = self.h_layers[i+1]
+            if isinstance(layer, nn.ConvTranspose1d):
+                h = h.unsqueeze(2)
+            h = torch.relu(layer(h))
 
         if detach:
             h = h.detach()

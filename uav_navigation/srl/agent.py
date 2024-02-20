@@ -14,6 +14,7 @@ from thop import clever_format
 from uav_navigation.agent import DDQNAgent
 from uav_navigation.utils import profile_model
 from uav_navigation.memory import PrioritizedReplayBuffer
+from uav_navigation.logger import summary_scalar, summary
 from .net import weight_init
 from .net import MLP
 from .net import VectorApproximator
@@ -115,7 +116,7 @@ class AEDDQNAgent(DDQNAgent):
 
         if approximator == VectorApproximator:
             self.decoder = MLP(self.encoder.feature_dim,
-                               state_space_shape[0], latent_dim)
+                               state_space_shape, latent_dim)
         if approximator == PixelApproximator:
             self.decoder = PixelDecoder(state_space_shape,
                                         self.encoder.feature_dim,
@@ -152,6 +153,9 @@ class AEDDQNAgent(DDQNAgent):
         latent_loss = (0.5 * h.pow(2).sum(1)).mean()
 
         loss = rec_loss + self.decoder_latent_lambda * latent_loss
+        summary_scalar('Loss/Reconstruction', rec_loss.item())
+        summary_scalar('Loss/Encoder', latent_loss.item())
+        summary_scalar('Loss/Autoencoder', loss.item())
         self.encoder_optimizer.zero_grad()
         self.decoder_optimizer.zero_grad()
         loss.backward()
@@ -170,3 +174,4 @@ class AEDDQNAgent(DDQNAgent):
                 self.update_decoder(sampled_data[0][0], sampled_data[0][0])
             else:
                 self.update_decoder(sampled_data[0], sampled_data[0])
+            summary().flush()

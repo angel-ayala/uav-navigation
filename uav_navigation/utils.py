@@ -14,7 +14,9 @@ import torch
 from thop import profile
 from tqdm import tqdm
 
-from webots_drone.utils import min_max_norm
+from .logger import summary
+from .logger import summary_create
+from .logger import summary_step
 
 
 def profile_model(model, input_shape, device):
@@ -71,9 +73,11 @@ def do_step(agent, env, state, callback=None, must_remember=True):
 def run_agent(agent, env, training_steps, mem_steps, train_frequency,
               target_update_steps, eval_interval, eval_epsilon, outpath,
               step_callback=None):
+    summary_create(outpath / 'logs')
     ended = True
     total_reward = 0
     total_episodes = 1
+    total_iterations = 0
     ep_reward = 0
     ep_steps = 0
     timemark = time.time()
@@ -98,7 +102,12 @@ def run_agent(agent, env, training_steps, mem_steps, train_frequency,
                 leave=False, unit='step',
                 bar_format='{desc}: {n:04d}|{bar}|[{rate_fmt}]')
     for step in range(training_steps):
+        summary_step(step)
         if ended:
+            if ep_steps > 0:
+                summary().add_scalar('Iteration/LearningReward', ep_reward, total_iterations)
+                summary().add_scalar('Iteration/LearningSteps', ep_steps, total_iterations)
+            total_iterations += 1
             ep_reward = 0
             ep_steps = 0
             state, info = env.reset()
@@ -129,6 +138,8 @@ def run_agent(agent, env, training_steps, mem_steps, train_frequency,
             agent.save(outpath / f"agent_ep_{total_episodes:03d}.pth")
             eval_reward, eval_steps, eval_time = evaluate_agent(
                 agent, env, eval_epsilon, step_callback)
+            summary().add_scalar('Iteration/EvaluationReward', eval_reward, total_episodes)
+            summary().add_scalar('Iteration/EvaluationSteps', eval_steps, total_episodes)
             total_episodes += 1
             total_reward += ep_reward
             tbar.reset()
@@ -138,6 +149,7 @@ def run_agent(agent, env, training_steps, mem_steps, train_frequency,
                 step_callback.new_episode()
             timemark = time.time()
 
+    summary().close()
     return total_reward, total_episodes
 
 

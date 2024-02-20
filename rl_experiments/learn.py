@@ -21,10 +21,10 @@ from uav_navigation.srl.net import PixelApproximator
 from uav_navigation.agent import DDQNAgent
 from uav_navigation.net import QNetwork
 from uav_navigation.net import QFeaturesNetwork
+from uav_navigation.memory import ReplayBuffer, PrioritizedReplayBuffer
 
 from uav_navigation.utils import save_dict_json
 from uav_navigation.utils import run_agent
-from uav_navigation.memory import ReplayBuffer, PrioritizedReplayBuffer
 from uav_navigation.utils import ReducedVectorObservation
 from uav_navigation.stack import ObservationStack
 
