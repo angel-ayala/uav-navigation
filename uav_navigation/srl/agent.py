@@ -153,9 +153,9 @@ class AEDDQNAgent(DDQNAgent):
         latent_loss = (0.5 * h.pow(2).sum(1)).mean()
 
         loss = rec_loss + self.decoder_latent_lambda * latent_loss
-        summary_scalar('Loss/Reconstruction', rec_loss.item())
+        summary_scalar('Loss/Decoder', rec_loss.item())
         summary_scalar('Loss/Encoder', latent_loss.item())
-        summary_scalar('Loss/Autoencoder', loss.item())
+        summary_scalar('Loss/AutoEncoder', loss.item())
         self.encoder_optimizer.zero_grad()
         self.decoder_optimizer.zero_grad()
         loss.backward()
