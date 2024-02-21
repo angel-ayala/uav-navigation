@@ -116,7 +116,7 @@ class AEDDQNAgent(DDQNAgent):
 
         if approximator == VectorApproximator:
             self.decoder = MLP(self.encoder.feature_dim,
-                               state_space_shape, latent_dim)
+                               state_space_shape, latent_dim).to(self.device)
         if approximator == PixelApproximator:
             self.decoder = PixelDecoder(state_space_shape,
                                         self.encoder.feature_dim,
