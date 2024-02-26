@@ -10,11 +10,12 @@ python learn.py --memory-prioritized --is-srl --is-pixels --use-cuda
 
 # DDQN DEBUG
 python learn.py \
---steps 1000 \
---eval-interval 100 \
---epsilon-steps 500 \
---target-update-frequency 10 \
---memory-capacity 128 \
+--steps 3000 \
+--eval-interval 300 \
+--eval-steps 300 \
+--epsilon-steps 1000 \
+--target-update-frequency 300 \
+--memory-capacity 2048 \
 --memory-steps 32 \
 --memory-prioritized \
 --target-pos random \

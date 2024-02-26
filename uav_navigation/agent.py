@@ -39,7 +39,7 @@ class DDQNAgent:
                  approximator,
                  approximator_lr=1e-3,
                  approximator_beta=0.9,
-                 approximator_tau=0.005,
+                 approximator_tau=0.1,
                  discount_factor=0.99,
                  epsilon_start=1.0,
                  epsilon_end=0.01,

@@ -47,7 +47,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
 
     arg_env = parser.add_argument_group('Environment')
-    arg_env.add_argument("--time-limit", type=int, default=60,
+    arg_env.add_argument("--time-limit", type=int, default=600,  # 10m
                          help='Max time (seconds) of the mission.')
     arg_env.add_argument("--time-no-action", type=int, default=5,
                          help='Max time (seconds) with no movement.')
@@ -73,7 +73,7 @@ def parse_args():
                            help='Q approximation function Adam learning rate.')
     arg_agent.add_argument("--approximator-beta", type=float, default=0.9,
                            help='Q approximation function Adam \beta.')
-    arg_agent.add_argument("--approximator-tau", type=float, default=0.005,
+    arg_agent.add_argument("--approximator-tau", type=float, default=0.1,
                            help='Soft target update \tau.')
     arg_agent.add_argument("--discount-factor", type=float, default=0.99,
                            help='Discount factor \gamma.')
@@ -81,9 +81,9 @@ def parse_args():
                            help='Initial epsilon value for exploration.')
     arg_agent.add_argument("--epsilon-end", type=float, default=0.01,
                            help='Final epsilon value for exploration.')
-    arg_agent.add_argument("--epsilon-steps", type=int, default=500000,
+    arg_agent.add_argument("--epsilon-steps", type=int, default=90000,  # 5h at 25 frames
                            help='Number of steps to reach minimum value for Epsilon.')
-    arg_agent.add_argument("--memory-capacity", type=int, default=131072,  # 2**17
+    arg_agent.add_argument("--memory-capacity", type=int, default=65536,  # 2**16
                            help='Maximum number of transitions in the Experience replay buffer.')
     arg_agent.add_argument("--memory-prioritized", action='store_true',
                            help='Whether if memory buffer is Prioritized experiencie replay or not.')
@@ -114,17 +114,19 @@ def parse_args():
                          help='Decoder function Adam weight decay value.')
 
     arg_training = parser.add_argument_group('Training')
-    arg_training.add_argument("--steps", type=int, default=1000000,
+    arg_training.add_argument("--steps", type=int, default=450000,  # 25h at 25 frames
                               help='Number of training steps.')
     arg_training.add_argument('--memory-steps', type=int, default=2048,
                               help='Number of steps for initial population of the Experience replay buffer.')
     arg_training.add_argument("--train-frequency", type=int, default=4,
                               help='Steps interval for Q-network batch training.')
-    arg_training.add_argument("--target-update-frequency", type=int, default=100,
+    arg_training.add_argument("--target-update-frequency", type=int, default=1500,  # 5m at 25 frames
                               help='Steps interval for target network update.')
-    arg_training.add_argument('--eval-interval', type=int, default=10000,
+    arg_training.add_argument('--eval-interval', type=int, default=9000,  # 30m at 25 frames
                               help='Steps interval for progress evaluation.')
     arg_training.add_argument('--eval-epsilon', type=float, default=0.01,
+                              help='Epsilon value used for evaluation.')
+    arg_training.add_argument('--eval-steps', type=int, default=300,  # 1m at 25 frames
                               help='Epsilon value used for evaluation.')
 
     arg_utils = parser.add_argument_group('Utils')
@@ -252,6 +254,7 @@ if __name__ == '__main__':
         target_update_steps=args.target_update_frequency,
         eval_interval=args.eval_interval,
         eval_epsilon=args.eval_epsilon,
+        eval_steps=args.eval_steps,
         outpath=outfolder)
     run_params_save = run_params.copy()
     run_params_save.update(dict(

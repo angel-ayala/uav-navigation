@@ -71,8 +71,8 @@ def do_step(agent, env, state, callback=None, must_remember=True):
 
 
 def run_agent(agent, env, training_steps, mem_steps, train_frequency,
-              target_update_steps, eval_interval, eval_epsilon, outpath,
-              step_callback=None):
+              target_update_steps, eval_interval, eval_epsilon, eval_steps,
+              outpath, step_callback=None):
     summary_create(outpath / 'logs')
     ended = True
     total_reward = 0
@@ -135,7 +135,7 @@ def run_agent(agent, env, training_steps, mem_steps, train_frequency,
             print(f"Episode {total_episodes:03d}\n- Learning: {elapsed_time:.3f} seconds\tR: {ep_reward:.4f}\tS: {ep_steps}")
             agent.save(outpath / f"agent_ep_{total_episodes:03d}.pth")
             eval_reward, eval_steps, eval_time = evaluate_agent(
-                agent, env, eval_epsilon, step_callback)
+                agent, env, eval_epsilon, eval_steps, step_callback)
             summary().add_scalar('Evaluation/EpReward', eval_reward, total_episodes)
             summary().add_scalar('Evaluation/EpNumberSteps', eval_steps, total_episodes)
             total_episodes += 1
@@ -155,7 +155,7 @@ def run_agent(agent, env, training_steps, mem_steps, train_frequency,
     return total_reward, total_episodes
 
 
-def evaluate_agent(agent, env, eval_epsilon, step_callback=None):
+def evaluate_agent(agent, env, eval_epsilon, eval_steps, step_callback=None):
     timemark = time.time()
     state, info = env.reset()
     ep_reward = 0
@@ -176,6 +176,8 @@ def evaluate_agent(agent, env, eval_epsilon, step_callback=None):
         ep_reward += reward
         sys.stdout.write(f"\rR: {ep_reward:.4f}\tS: {ep_steps}")
         sys.stdout.flush()
+        if ep_steps == eval_steps:
+            end = True
 
     elapsed_time = time.time() - timemark
     sys.stdout.flush()
