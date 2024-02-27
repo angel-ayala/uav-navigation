@@ -26,20 +26,44 @@ from uav_navigation.utils import load_json_dict
 from uav_navigation.utils import evaluate_agent
 from uav_navigation.utils import ReducedVectorObservation
 from uav_navigation.stack import ObservationStack
+from learn import list_of_float
+from learn import xy_coordinates
 
 from webots_drone.data import StoreStepData
 
 
 def parse_args():
     parser = argparse.ArgumentParser()    # misc
-    parser.add_argument('--seed', type=int, default=666)
     parser.add_argument('--logspath', type=str,
                         default='logs/ddqn-srl_2023-11-28_00-13-33',
                         help='Log path with training results.')
+    parser.add_argument('--seed', type=int, default=666)
     parser.add_argument('--episode', type=int, default=-1,
                         help='Indicate the episode number to execute, set -1 for all of them')
+    parser.add_argument('--eval-steps', type=int, default=300,  # 1m at 25 frames
+                        help='Epsilon value used for evaluation.')
+    parser.add_argument("--load-config", action='store_true',
+                        help="Whether if force config file's value argument'.")
     parser.add_argument('--render', action='store_true',
                         help='Specific if show or not Env.render.')
+
+    arg_env = parser.add_argument_group('Environment')
+    arg_env.add_argument("--time-limit", type=int, default=600,  # 10m
+                         help='Max time (seconds) of the mission.')
+    arg_env.add_argument("--frame-skip", type=int, default=25,  # 200ms
+                         help='Number of simulation steps for a RL step')
+    arg_env.add_argument("--goal-threshold", type=float, default=5.,
+                         help='Minimum distance from the target.')
+    arg_env.add_argument("--init-altitude", type=float, default=25.,
+                         help='Minimum height distance to begin the mission.')
+    arg_env.add_argument("--altitude-limits", type=list_of_float,
+                         default=[11., 75.], help='Vertical flight limits.')
+    arg_env.add_argument("--target-pos", type=xy_coordinates, default=[-40., 40.],
+                         help='Initial position of the target.')
+    arg_env.add_argument("--target-dim", type=list_of_float, default=[7., 3.5],
+                         help="Target's dimension size.")
+    arg_env.add_argument("--is-pixels", action='store_true',
+                         help='Whether if state is image-based or vector-based.')
 
     args = parser.parse_args()
     return args
@@ -53,12 +77,24 @@ def run_evaluation(seed_val, logpath, episode):
     logpath = Path(logpath)
     agents_path = list(logpath.glob('**/*.pth'))
     agents_path.sort()
+    episode = episode - 1
 
     # Environment args
     environment_name = 'webots_drone:webots_drone/DroneEnvDiscrete-v0'
     env_params = load_json_dict(logpath / 'args_environment.json')
     frame_stack = env_params['frame_stack']
     del env_params['frame_stack']
+
+    if not args.load_config:
+        env_params['time_limit_seconds'] = args.time_limit
+        env_params['frame_skip'] = args.frame_skip
+        env_params['goal_threshold'] = args.goal_threshold
+        env_params['init_altitude'] = args.init_altitude
+        env_params['altitude_limits'] = args.altitude_limits
+        env_params['fire_pos'] = args.target_pos
+        env_params['fire_dim'] = args.target_dim
+        env_params['is_pixels'] = args.is_pixels
+
     # Create the environment
     env = gym.make(environment_name, **env_params)
     if not env_params['is_pixels']:
@@ -100,9 +136,9 @@ def run_evaluation(seed_val, logpath, episode):
         agent = agent_class(**agent_params)
         agent.load(agent_path)
         store_callback = StoreStepData(
-            logpath / f"history_eval_{log_ep:03d}.csv")
+            logpath / f"history_eval_{log_ep+1:03d}.csv")
         evaluate_agent(agent, env, training_params['eval_epsilon'],
-                       step_callback=store_callback)
+                       args.eval_steps, step_callback=store_callback)
 
 
 if __name__ == '__main__':

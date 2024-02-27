@@ -70,8 +70,8 @@ def parse_args():
 
     arg_agent = parser.add_argument_group('Agent')
     arg_agent.add_argument("--approximator-lr", type=float, default=10e-4,
-                           help='Q approximation function Adam learning rate.'
-                           'default as recommended in: '
+                           help='Q approximation function SGD learning rate.'
+                           'default value is recommended in: '
                            '[Interference and Generalization in Temporal '
                            'Difference Learning]('
                            'https://proceedings.mlr.press/v119/bengio20a.htm)')
