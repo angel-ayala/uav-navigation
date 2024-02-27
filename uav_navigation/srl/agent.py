@@ -58,7 +58,7 @@ class AEDDQNAgent(DDQNAgent):
                  device,
                  approximator,
                  approximator_lr=1e-3,
-                 approximator_beta=0.9,
+                 approximator_momentum=0.9,
                  approximator_tau=0.005,
                  discount_factor=0.99,
                  epsilon_start=1.0,
@@ -80,7 +80,7 @@ class AEDDQNAgent(DDQNAgent):
             device=device,
             approximator=approximator,
             approximator_lr=approximator_lr,
-            approximator_beta=approximator_beta,
+            approximator_momentum=approximator_momentum,
             approximator_tau=approximator_tau,
             discount_factor=discount_factor,
             epsilon_start=epsilon_start,
@@ -110,9 +110,10 @@ class AEDDQNAgent(DDQNAgent):
 
         # Initialize target network with Q-network parameters
         self.update_target_network()
-        self.optimizer = optim.Adam(self.q_network.parameters(),
-                                    lr=approximator_lr,
-                                    betas=(approximator_beta, 0.999))
+        self.optimizer = optim.SGD(self.q_network.parameters(),
+                                   lr=approximator_lr,
+                                   momentum=approximator_momentum,
+                                   nesterov=True)
 
         if approximator == VectorApproximator:
             self.decoder = MLP(self.encoder.feature_dim,
@@ -128,16 +129,15 @@ class AEDDQNAgent(DDQNAgent):
         self.decoder_latent_lambda = decoder_latent_lambda
         self.decoder.apply(weight_init)
         # optimizer for critic encoder for reconstruction loss
-        self.encoder_optimizer = optim.Adam(
-            self.encoder.parameters(), lr=encoder_lr
-        )
+        self.encoder_optimizer = optim.SGD(
+            self.encoder.parameters(), lr=encoder_lr,
+            momentum=approximator_momentum, nesterov=True)
 
         # optimizer for decoder
-        self.decoder_optimizer = optim.Adam(
-            self.decoder.parameters(),
-            lr=decoder_lr,
-            weight_decay=decoder_weight_decay
-        )
+        self.decoder_optimizer = optim.SGD(
+            self.decoder.parameters(), lr=decoder_lr,
+            weight_decay=decoder_weight_decay,
+            momentum=approximator_momentum, nesterov=True)
 
     def update_decoder(self, obs, target_obs):
         h = self.encoder(obs)

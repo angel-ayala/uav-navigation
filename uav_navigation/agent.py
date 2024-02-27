@@ -38,7 +38,7 @@ class DDQNAgent:
                  device,
                  approximator,
                  approximator_lr=1e-3,
-                 approximator_beta=0.9,
+                 approximator_momentum=0.9,
                  approximator_tau=0.1,
                  discount_factor=0.99,
                  epsilon_start=1.0,
@@ -62,9 +62,10 @@ class DDQNAgent:
         # Initialize target network with Q-network parameters
         self.update_target_network()
 
-        self.optimizer = optim.Adam(self.q_network.parameters(),
-                                    lr=approximator_lr,
-                                    betas=(approximator_beta, 0.999))
+        self.optimizer = optim.SGD(self.q_network.parameters(),
+                                   lr=approximator_lr,
+                                   momentum=approximator_momentum,
+                                   nesterov=True)
 
         # Replay Buffer
         self.memory = memory_buffer

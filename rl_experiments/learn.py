@@ -69,8 +69,12 @@ def parse_args():
                          help='Whether if state is image-based or vector-based.')
 
     arg_agent = parser.add_argument_group('Agent')
-    arg_agent.add_argument("--approximator-lr", type=float, default=25e-5,
-                           help='Q approximation function Adam learning rate.')
+    arg_agent.add_argument("--approximator-lr", type=float, default=10e-4,
+                           help='Q approximation function Adam learning rate.'
+                           'default as recommended in: '
+                           '[Interference and Generalization in Temporal '
+                           'Difference Learning]('
+                           'https://proceedings.mlr.press/v119/bengio20a.htm)')
     arg_agent.add_argument("--approximator-beta", type=float, default=0.9,
                            help='Q approximation function Adam \beta.')
     arg_agent.add_argument("--approximator-tau", type=float, default=0.1,
@@ -91,6 +95,9 @@ def parse_args():
                            help='Alpha prioritization exponent for PER.')
     arg_agent.add_argument("--prioritized-initial-beta", type=float, default=0.4,
                            help='Beta bias for sampling for PER.')
+    arg_agent.add_argument("--approximator-momentum", type=float, default=.9,
+                           help='Momentum factor factor for the SGD using'
+                           'using nesterov')
 
     arg_srl = parser.add_argument_group(
         'State representation learning variation')
@@ -188,7 +195,7 @@ if __name__ == '__main__':
         device=agent_device,
         approximator=agent_approximator,
         approximator_lr=args.approximator_lr,
-        approximator_beta=args.approximator_beta,
+        approximator_momentum=args.approximator_momentum,
         approximator_tau=args.approximator_tau,
         discount_factor=args.discount_factor,
         epsilon_start=args.epsilon_start,
