@@ -69,12 +69,12 @@ def parse_args():
                          help='Whether if state is image-based or vector-based.')
 
     arg_agent = parser.add_argument_group('Agent')
-    arg_agent.add_argument("--approximator-lr", type=float, default=10e-4,
+    arg_agent.add_argument("--approximator-lr", type=float, default=10e-5,
                            help='Q approximation function SGD learning rate.'
                            'default value is recommended in: '
                            '[Interference and Generalization in Temporal '
                            'Difference Learning]('
-                           'https://proceedings.mlr.press/v119/bengio20a.htm)')
+                           'https://proceedings.mlr.press/v119/bengio20a.html )')
     arg_agent.add_argument("--approximator-beta", type=float, default=0.9,
                            help='Q approximation function Adam \beta.')
     arg_agent.add_argument("--approximator-tau", type=float, default=0.1,
