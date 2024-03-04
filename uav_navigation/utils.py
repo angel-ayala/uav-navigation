@@ -134,12 +134,11 @@ def run_agent(agent, env, training_steps, mem_steps, train_frequency,
             tbar.clear()
             print(f"Episode {total_episodes:03d}\n- Learning: {elapsed_time:.3f} seconds\tR: {ep_reward:.4f}\tS: {ep_steps}")
             agent.save(outpath / f"agent_ep_{total_episodes:03d}.pth")
-            eval_reward, eval_steps, eval_time = evaluate_agent(
+            e_reward, e_steps, e_time = evaluate_agent(
                 agent, env, eval_epsilon, eval_steps, step_callback)
-            summary().add_scalar('Evaluation/EpReward', eval_reward, total_episodes)
-            summary().add_scalar('Evaluation/EpNumberSteps', eval_steps, total_episodes)
+            summary().add_scalar('Evaluation/EpReward', e_reward, total_episodes)
+            summary().add_scalar('Evaluation/EpNumberSteps', e_steps, total_episodes)
             total_episodes += 1
-            total_reward += ep_reward
             tbar.reset()
             tbar.set_description(f"Episode {total_episodes:03d}")
             ended = True
@@ -148,6 +147,7 @@ def run_agent(agent, env, training_steps, mem_steps, train_frequency,
             timemark = time.time()
 
         if ended:
+            total_reward += ep_reward
             summary().add_scalar('Learning/EpReward', ep_reward, total_iterations)
             summary().add_scalar('Learning/EpNumberSteps', ep_steps, total_iterations)
 

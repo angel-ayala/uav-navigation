@@ -30,6 +30,7 @@ from uav_navigation.stack import ObservationStack
 
 
 from webots_drone.data import StoreStepData
+from webots_drone.envs.preprocessor import TargetVectorObservation
 
 
 def list_of_float(arg):
@@ -67,6 +68,8 @@ def parse_args():
                          help="Target's dimension size.")
     arg_env.add_argument("--is-pixels", action='store_true',
                          help='Whether if state is image-based or vector-based.')
+    arg_env.add_argument("--add-target", action='store_true',
+                         help='Whether if add the target info to vector state.')
 
     arg_agent = parser.add_argument_group('Agent')
     arg_agent.add_argument("--approximator-lr", type=float, default=10e-5,
@@ -170,6 +173,10 @@ if __name__ == '__main__':
     env = gym.make(environment_name, **env_params)
     if not args.is_pixels:
         env = ReducedVectorObservation(env)
+    
+    if args.add_target:
+        env_params['add_target'] = True
+        env = TargetVectorObservation(env)
 
     # Observation preprocessing
     env_params['frame_stack'] = args.frame_stack

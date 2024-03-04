@@ -30,7 +30,7 @@ from learn import list_of_float
 from learn import xy_coordinates
 
 from webots_drone.data import StoreStepData
-
+from webots_drone.envs.preprocessor import TargetVectorObservation
 
 def parse_args():
     parser = argparse.ArgumentParser()    # misc
@@ -84,6 +84,10 @@ def run_evaluation(seed_val, logpath, episode):
     env_params = load_json_dict(logpath / 'args_environment.json')
     frame_stack = env_params['frame_stack']
     del env_params['frame_stack']
+    add_target = False
+    if 'add_target' in env_params.keys():
+        add_target = env_params['add_target']
+        del env_params['add_target']
 
     if not args.load_config:
         env_params['time_limit_seconds'] = args.time_limit
@@ -93,12 +97,13 @@ def run_evaluation(seed_val, logpath, episode):
         env_params['altitude_limits'] = args.altitude_limits
         env_params['fire_pos'] = args.target_pos
         env_params['fire_dim'] = args.target_dim
-        env_params['is_pixels'] = args.is_pixels
 
     # Create the environment
     env = gym.make(environment_name, **env_params)
     if not env_params['is_pixels']:
         env = ReducedVectorObservation(env)
+    if add_target:
+        env = TargetVectorObservation(env)
     if frame_stack > 1:
         env = ObservationStack(env, k=frame_stack)
 

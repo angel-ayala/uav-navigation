@@ -142,9 +142,11 @@ class AEDDQNAgent(DDQNAgent):
     def update_decoder(self, obs, target_obs):
         h = self.encoder(obs)
 
-        if target_obs.dim() == 4:
-            # preprocess images to be in [-0.5, 0.5] range
-            target_obs = preprocess_obs(target_obs)
+        if target_obs.dim() <= 3:
+            # if vector based
+            target_obs = (target_obs + 1.) / 2.
+        # preprocess target to be in [-0.5, 0.5] range
+        target_obs = preprocess_obs(target_obs)
         rec_obs = self.decoder(h)
         rec_loss = F.mse_loss(target_obs, rec_obs)
 
