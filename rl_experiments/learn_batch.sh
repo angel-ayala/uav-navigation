@@ -18,7 +18,6 @@ python learn.py \
 --memory-capacity 2048 \
 --memory-steps 32 \
 --memory-prioritized \
---target-pos random \
 --frame-stack 3 \
 --is-pixels --use-cuda \
 --is-srl

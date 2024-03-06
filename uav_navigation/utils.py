@@ -134,10 +134,12 @@ def run_agent(agent, env, training_steps, mem_steps, train_frequency,
             tbar.clear()
             print(f"Episode {total_episodes:03d}\n- Learning: {elapsed_time:.3f} seconds\tR: {ep_reward:.4f}\tS: {ep_steps}")
             agent.save(outpath / f"agent_ep_{total_episodes:03d}.pth")
-            e_reward, e_steps, e_time = evaluate_agent(
-                agent, env, eval_epsilon, eval_steps, step_callback)
-            summary().add_scalar('Evaluation/EpReward', e_reward, total_episodes)
-            summary().add_scalar('Evaluation/EpNumberSteps', e_steps, total_episodes)
+            for fc in range(4):
+                e_reward, e_steps, e_time = evaluate_agent(
+                    agent, env, eval_epsilon, eval_steps, fire_cuadrant=fc,
+                    step_callback=step_callback)
+                summary().add_scalar(f"Evaluation/EpRewardC{fc}", e_reward, total_episodes)
+                summary().add_scalar(f"Evaluation/EpNumberStepsC{fc}", e_steps, total_episodes)
             total_episodes += 1
             tbar.reset()
             tbar.set_description(f"Episode {total_episodes:03d}")
@@ -155,9 +157,9 @@ def run_agent(agent, env, training_steps, mem_steps, train_frequency,
     return total_reward, total_episodes
 
 
-def evaluate_agent(agent, env, eval_epsilon, eval_steps, step_callback=None):
+def evaluate_agent(agent, env, eval_epsilon, eval_steps, fire_cuadrant=2, step_callback=None):
     timemark = time.time()
-    state, info = env.reset()
+    state, info = env.reset(fire_cuadrant=fire_cuadrant)
     ep_reward = 0
     ep_steps = 0
     end = False

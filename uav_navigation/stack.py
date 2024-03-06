@@ -39,8 +39,8 @@ class ObservationStack(gym.Wrapper):
             low=obs_low, high=obs_high,
             shape=((shp[0] * k,) + shp[1:]), dtype=env.observation_space.dtype)
 
-    def reset(self):
-        obs, info = self.env.reset()
+    def reset(self, **kwargs):
+        obs, info = self.env.reset(**kwargs)
         if len(obs.shape) == 1:
             obs = obs[np.newaxis, ...]
         for _ in range(self.k):

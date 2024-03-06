@@ -62,8 +62,8 @@ def parse_args():
                          help='Minimum height distance to begin the mission.')
     arg_env.add_argument("--altitude-limits", type=list_of_float,
                          default=[11., 75.], help='Vertical flight limits.')
-    arg_env.add_argument("--target-pos", type=xy_coordinates, default=[-40., 40.],
-                         help='Initial position of the target.')
+    arg_env.add_argument("--target-pos", type=int, default=None,
+                         help='Cuadrant number for target position.')
     arg_env.add_argument("--target-dim", type=list_of_float, default=[7., 3.5],
                          help="Target's dimension size.")
     arg_env.add_argument("--is-pixels", action='store_true',
