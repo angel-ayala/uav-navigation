@@ -37,6 +37,10 @@ def list_of_float(arg):
     return list(map(float, arg.split(',')))
 
 
+def list_of_int(arg):
+    return list(map(int, arg.split(',')))
+
+
 def xy_coordinates(arg):
     if arg.lower() == 'random':
         return None
@@ -137,7 +141,7 @@ def parse_args():
     arg_training.add_argument('--eval-epsilon', type=float, default=0.01,
                               help='Epsilon value used for evaluation.')
     arg_training.add_argument('--eval-steps', type=int, default=300,  # 1m at 25 frames
-                              help='Epsilon value used for evaluation.')
+                              help='Number of evaluation steps.')
 
     arg_utils = parser.add_argument_group('Utils')
     arg_utils.add_argument('--use-cuda', action='store_true',

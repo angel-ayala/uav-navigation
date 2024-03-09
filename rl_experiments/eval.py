@@ -27,7 +27,7 @@ from uav_navigation.utils import evaluate_agent
 from uav_navigation.utils import ReducedVectorObservation
 from uav_navigation.stack import ObservationStack
 from learn import list_of_float
-from learn import xy_coordinates
+from learn import list_of_int
 
 from webots_drone.data import StoreStepData
 from webots_drone.envs.preprocessor import TargetVectorObservation
@@ -58,7 +58,7 @@ def parse_args():
                          help='Minimum height distance to begin the mission.')
     arg_env.add_argument("--altitude-limits", type=list_of_float,
                          default=[11., 75.], help='Vertical flight limits.')
-    arg_env.add_argument("--target-pos", type=int, default=None,
+    arg_env.add_argument("--target-pos", type=list_of_int, default=[0, 1, 2, 3],
                          help='Cuadrant number for target position.')
     arg_env.add_argument("--target-dim", type=list_of_float, default=[7., 3.5],
                          help="Target's dimension size.")
@@ -87,13 +87,14 @@ def run_evaluation(seed_val, logpath, episode):
         add_target = env_params['add_target']
         del env_params['add_target']
 
+    target_pos = args.target_pos
+
     if not args.load_config:
         env_params['time_limit_seconds'] = args.time_limit
         env_params['frame_skip'] = args.frame_skip
         env_params['goal_threshold'] = args.goal_threshold
         env_params['init_altitude'] = args.init_altitude
         env_params['altitude_limits'] = args.altitude_limits
-        env_params['fire_pos'] = args.target_pos
         env_params['fire_dim'] = args.target_dim
 
     # Create the environment
@@ -140,8 +141,11 @@ def run_evaluation(seed_val, logpath, episode):
         agent.load(agent_path)
         store_callback = StoreStepData(
             logpath / f"history_eval_{log_ep+1:03d}.csv")
-        evaluate_agent(agent, env, training_params['eval_epsilon'],
-                       args.eval_steps, step_callback=store_callback)
+        for fc in target_pos:
+            evaluate_agent(agent, env, training_params['eval_epsilon'],
+                           args.eval_steps,
+                           fire_cuadrant=fc,
+                           step_callback=store_callback)
 
 
 if __name__ == '__main__':

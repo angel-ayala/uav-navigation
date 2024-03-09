@@ -16,6 +16,8 @@ from uav_navigation.utils import profile_model
 from uav_navigation.memory import PrioritizedReplayBuffer
 from uav_navigation.logger import summary_scalar, summary
 from .net import weight_init
+from .net import slowness_cost
+from .net import variability_cost
 from .net import MLP
 from .net import VectorApproximator
 from .net import PixelApproximator
@@ -155,6 +157,14 @@ class AEDDQNAgent(DDQNAgent):
         latent_loss = (0.5 * h.pow(2).sum(1)).mean()
 
         loss = rec_loss + self.decoder_latent_lambda * latent_loss
+        # Compute slowness cost
+        slowness_loss = slowness_cost(h)
+        loss += slowness_loss
+        # Compute variability cost
+        variability_loss = variability_cost(h)
+        loss += variability_loss
+        summary_scalar('Loss/Slowness', slowness_loss.item())
+        summary_scalar('Loss/Variability', variability_loss.item())
         summary_scalar('Loss/Decoder', rec_loss.item())
         summary_scalar('Loss/Encoder', latent_loss.item())
         summary_scalar('Loss/AutoEncoder', loss.item())

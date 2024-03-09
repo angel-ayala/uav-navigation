@@ -30,6 +30,46 @@ def weight_init(m):
         nn.init.orthogonal_(m.weight.data[:, :, mid, mid], gain)
 
 
+def slowness_cost(output_batch, lambda_=0.1):
+    """
+    Compute the slowness cost for a batch of output sequences.
+
+    Parameters:
+    - output_batch: A 2D PyTorch tensor representing the batch of output sequences.
+                    Each row represents one output sequence.
+    - lambda_: A regularization parameter controlling the strength of the penalty.
+
+    Returns:
+    - slowness: The average slowness cost over the batch.
+    """
+    batch_size = output_batch.size(0)
+    slowness_total = 0.0
+
+    for i in range(batch_size):
+        output_sequence = output_batch[i]
+        squared_diffs = torch.square(torch.diff(output_sequence))
+        slowness_total += lambda_ * torch.sum(squared_diffs)
+
+    slowness = slowness_total / batch_size
+    return slowness
+
+
+def variability_cost(encoded_batch):
+    """
+    Compute the variability loss for a batch of encoded representations.
+
+    Parameters:
+    - encoded_batch: A 2D PyTorch tensor representing the batch of encoded representations.
+                     Each row represents one encoded representation.
+
+    Returns:
+    - variability: The variability loss.
+    """
+    mean_encoded = torch.mean(encoded_batch, dim=0)
+    variance = torch.mean(torch.square(encoded_batch - mean_encoded))
+    return variance
+
+
 class MLP(nn.Module):
     """MLP for q-function."""
 
