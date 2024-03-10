@@ -72,8 +72,8 @@ def do_step(agent, env, state, callback=None, must_remember=True):
 
 def obs2tensor(observations):
     if type(observations) is not torch.Tensor:
-        obs_tensor = torch.tensor(observations, dtype=torch.float32
-                                  ).unsqueeze(0)
+        obs_tensor = torch.tensor(np.array(observations),
+                                  dtype=torch.float32).unsqueeze(0)
     else:
         obs_tensor = observations
     return obs_tensor
