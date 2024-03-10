@@ -12,6 +12,7 @@ import torch.optim as optim
 from thop import clever_format
 from .utils import profile_model
 from .utils import soft_update_params
+from .utils import obs2tensor
 from .memory import is_prioritized_memory
 from .logger import summary_scalar
 
@@ -31,8 +32,8 @@ def profile_agent(agent, state_space_shape, action_space_shape):
 
 class QFunction:
 
-    def __init__(self, q_app_fn, q_app_params, learning_rate=1e-3,
-                 momentum=0.9, tau=0.005, use_cuda=True):
+    def __init__(self, q_app_fn, q_app_params, learning_rate=10e-5,
+                 momentum=0.9, tau=0.1, use_cuda=True):
 
         self.device = 'cuda'\
             if torch.cuda.is_available() and use_cuda else 'cpu'
@@ -49,13 +50,9 @@ class QFunction:
         # optimization function
         self.loss_fn = nn.SmoothL1Loss(reduction='none')
         self.optimizer = optim.SGD(self.q_network.parameters(),
-                                   lr=approximator_lr,
+                                   lr=learning_rate,
                                    momentum=momentum,
                                    nesterov=True)
-
-        # Replay Buffer
-        self.memory = memory_buffer
-        self.update_epsilon(0)
 
     def select_action(self, state):
         # Choose action using epsilon-greedy policy
@@ -69,14 +66,6 @@ class QFunction:
                 q_values = self.q_network(state_tensor).cpu().numpy()
             return np.argmax(q_values)  # Exploit
 
-    def update_epsilon(self, n_step):
-        # Anneal exploration rate
-        self.epsilon = max(self.epsilon_end,
-                           self.epsilon_start - (self.epsilon_decay * n_step))
-        summary_scalar('Agent/Epsilon', self.epsilon)
-        if isinstance(self.memory, PrioritizedReplayBuffer):
-            self.memory.update_beta(n_step)
-
     def update_target_network(self):
         # Soft update the target network
         soft_update_params(net=self.q_network,
@@ -85,11 +74,7 @@ class QFunction:
 
     def compute_q(self, observations, actions=None):
         # Compute Q-values using the Q-network
-        if type(observations) is not torch.Tensor:
-            obs_tensor = torch.tensor(observations, dtype=torch.float32
-                                      ).unsqueeze(0)
-        else:
-            obs_tensor = observations
+        obs_tensor = obs2tensor(observations)
         q_values = self.q_network(obs_tensor.to(self.device))
         if actions is not None:
             actions_argmax = actions.argmax(-1)
@@ -100,11 +85,7 @@ class QFunction:
 
     def compute_q_target(self, observations, actions=None):
         # Compute Q-values using the target Q-network
-        if type(observations) is not torch.Tensor:
-            obs_tensor = torch.tensor(observations, dtype=torch.float32
-                                      ).unsqueeze(0)
-        else:
-            obs_tensor = observations
+        obs_tensor = obs2tensor(observations)
         q_values = self.target_q_network(obs_tensor.to(self.device))
         if actions is not None:
             actions_argmax = actions.argmax(-1)
@@ -143,11 +124,9 @@ class QFunction:
         self.q_network.load_state_dict(checkpoint['q_network_state_dict'])
         self.target_q_network.load_state_dict(checkpoint['target_q_network_state_dict'])
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-
-        if eval_only:
-            # Ensure the models are in evaluation mode after loading
-            self.q_network.eval()
-            self.target_q_network.eval()
+        # Ensure the models are in evaluation mode after loading
+        self.q_network.eval()
+        self.target_q_network.eval()
 
 
 class DDQNAgent:
@@ -190,6 +169,7 @@ class DDQNAgent:
         # Anneal exploration rate
         self.epsilon = max(self.epsilon_end,
                            self.epsilon_start - (self.epsilon_decay * n_step))
+        summary_scalar('Agent/Epsilon', self.epsilon)
         if self.is_prioritized:
             self.memory.update_beta(n_step)
 

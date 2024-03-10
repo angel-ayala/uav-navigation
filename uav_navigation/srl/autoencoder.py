@@ -12,6 +12,7 @@ from .net import preprocess_obs
 from .net import rgb_reconstruction_model
 from .net import vector_reconstruction_model
 from .net import imu2pose_model
+from uav_navigation.logger import summary_scalar
 
 
 class AEModel:
@@ -49,7 +50,20 @@ class AEModel:
                                         lr=encoder_lr,
                                         weight_decay=decoder_weight_decay)
         self.decoder_optim = [optim.Adam(self.decoder[i].parameters(),
+                                         lr=decoder_lr,
+                                         weight_decay=decoder_weight_decay)
+                              for i, decoder_lr in enumerate(decoders_lr)]
+
+    def sgd_optimizer(self, encoder_lr, decoders_lr, decoder_weight_decay):
+        if type(decoders_lr) is not list:
+            decoders_lr = [decoders_lr]
+        self.encoder_optim = optim.SGD(self.encoder.parameters(),
+                                       lr=encoder_lr,
+                                       momentum=0.9,
+                                       weight_decay=decoder_weight_decay)
+        self.decoder_optim = [optim.SGD(self.decoder[i].parameters(),
                                         lr=decoder_lr,
+                                        momentum=0.9,
                                         weight_decay=decoder_weight_decay)
                               for i, decoder_lr in enumerate(decoders_lr)]
 
@@ -78,9 +92,10 @@ class AEModel:
     def optimize_reconstruction(self, obs, decoder_latent_lambda):
         rec_obs, h = self.reconstruct_obs(obs)
 
-        if obs.dim() == 4 or obs.dim() == 2:
-            # preprocess images to be in [-0.5, 0.5] range
-            target_obs = preprocess_obs(obs)
+        if obs.dim() <= 3:
+            obs = (obs + 1) / 2.
+        # preprocess images to be in [-0.5, 0.5] range
+        target_obs = preprocess_obs(obs)
         rec_loss = F.mse_loss(target_obs, rec_obs)
 
         # add L2 penalty on latent representation
@@ -89,17 +104,18 @@ class AEModel:
 
         rloss = rec_loss + decoder_latent_lambda * latent_loss
 
+        summary_scalar('Loss/Decoder', rec_loss.item())
+        summary_scalar('Loss/Encoder', latent_loss.item())
+        summary_scalar('Loss/Reconstruction', rloss.item())
+
         # # Compute slowness cost
         # slowness_loss = slowness_cost(h)
         # loss += slowness_loss
+        # summary_scalar('Loss/Slowness', slowness_loss.item())
         # # Compute variability cost
         # variability_loss = variability_cost(h)
         # loss += variability_loss
-        # summary_scalar('Loss/Slowness', slowness_loss.item())
         # summary_scalar('Loss/Variability', variability_loss.item())
-        # summary_scalar('Loss/Decoder', rec_loss.item())
-        # summary_scalar('Loss/Encoder', latent_loss.item())
-        # summary_scalar('Loss/AutoEncoder', loss.item())
 
         # encoder optimizer
         self.encoder_optim.zero_grad()

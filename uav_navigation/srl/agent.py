@@ -13,18 +13,9 @@ from thop import clever_format
 from uav_navigation.agent import QFunction
 from uav_navigation.agent import DDQNAgent
 from uav_navigation.utils import profile_model
+from uav_navigation.utils import obs2tensor
 from .net import weight_init
 from .autoencoder import AEModel
-from uav_navigation.memory import PrioritizedReplayBuffer
-from uav_navigation.logger import summary_scalar, summary
-from .net import weight_init
-from .net import slowness_cost
-from .net import variability_cost
-from .net import MLP
-from .net import VectorApproximator
-from .net import PixelApproximator
-from .autoencoder import PixelDecoder
-from .autoencoder import preprocess_obs
 
 
 def profile_agent(agent, state_space_shape, action_space_shape):
@@ -58,22 +49,19 @@ def profile_agent(agent, state_space_shape, action_space_shape):
 
 class SRLFunction(QFunction):
     def __init__(self, q_app_fn, q_app_params, learning_rate=1e-3,
-                 adam_beta1=0.9, tau=0.005, use_cuda=True,
+                 momentum=0.9, tau=0.1, use_cuda=True,
                  decoder_latent_lambda=1e-6):
-        super().__init__(q_app_fn, q_app_params, learning_rate, adam_beta1,
-                         tau=tau,
-                         use_cuda=use_cuda)
+        super().__init__(q_app_fn, q_app_params, learning_rate, momentum,
+                         tau=tau, use_cuda=use_cuda)
         self.models = list()
         self.decoder_latent_lambda = decoder_latent_lambda
 
     def update_multimodal(self):
-        is_rgb = False
-        is_vector = False
-        for m in self.models:
-            is_rgb = m.type == 'rgb' or is_rgb
-            is_vector = m.type == 'vector' or m.type == 'imu2pose' or is_vector
-
-        self.is_multimodal = is_rgb and is_vector
+        ae_types = [m.type for m in self.models]
+        print('ae+models', ae_types)
+        self.is_multimodal = "rgb" in ae_types and (
+            "vector" in ae_types or "imu2pose" in ae_types)
+        print('multimodal', self.is_multimodal)
 
     def append_autoencoder(self, ae_model,
                            encoder_lr,
@@ -81,7 +69,7 @@ class SRLFunction(QFunction):
                            decoder_weight_decay):
         ae_model.to(self.device)
         ae_model.apply(weight_init)
-        ae_model.adam_optimizer(encoder_lr, decoder_lr, decoder_weight_decay)
+        ae_model.sgd_optimizer(encoder_lr, decoder_lr, decoder_weight_decay)
         self.models.append(ae_model)
         self.update_multimodal()
 
@@ -112,12 +100,14 @@ class SRLFunction(QFunction):
 
     def compute_q(self, observations, actions=None):
         # Compute Q-values using the inferenced z latent representation
-        z_hat = self.compute_z(observations)
+        obs_tensor = obs2tensor(observations)
+        z_hat = self.compute_z(obs_tensor)
         return super().compute_q(z_hat, actions)
 
     def compute_q_target(self, observations, actions=None):
         # Compute Q-values using the target Q-network
-        z_hat = self.compute_z(observations)
+        obs_tensor = obs2tensor(observations)
+        z_hat = self.compute_z(obs_tensor)
         return super().compute_q_target(z_hat, actions)
 
     def save(self, path, ae_models, encoder_only=False):
@@ -202,13 +192,10 @@ class SRLDDQNAgent(DDQNAgent):
                 m_params['decoder_weight_decay'])
 
         self.ae_models = ae_models
-        ae_types = self.ae_models.keys()
-        self.is_multimodal = "rgb" in ae_types and (
-            "vector" in ae_types or "imu2pose" in ae_types)
 
     def update_representation(self, obs):
         obs_2d = obs
-        if self.is_multimodal:
+        if self.approximator.is_multimodal:
             obs_2d = obs[0]
             obs = obs[1]
         for ae_model in self.approximator.models:
@@ -233,7 +220,6 @@ class SRLDDQNAgent(DDQNAgent):
                 self.update_representation(sampled_data[0][0])
             else:
                 self.update_representation(sampled_data[0])
-            summary().flush()
 
     def save(self, path):
         self.approximator.save(path, ae_models=self.ae_models.items())

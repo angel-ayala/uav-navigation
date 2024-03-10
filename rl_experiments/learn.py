@@ -184,8 +184,6 @@ if __name__ == '__main__':
 
     # Create the environment
     env = gym.make(environment_name, **env_params)
-    if not args.is_pixels:
-        env = ReducedVectorObservation(env)
     
     if args.add_target:
         env_params['add_target'] = True
@@ -207,11 +205,9 @@ if __name__ == '__main__':
                        env.observation_space[1].shape)
 
     if args.frame_stack > 1 and not is_multimodal:
-        env = gym.wrappers.FrameStack(env, num_stack=args.frame_stack)
+        env = ObservationStack(env, k=args.frame_stack)
 
     env_params['frame_stack'] = args.frame_stack
-    if args.frame_stack > 1:
-        env = ObservationStack(env, k=args.frame_stack)
 
     # Agent args
     state_shape = env.observation_space.shape

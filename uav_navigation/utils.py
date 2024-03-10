@@ -70,6 +70,15 @@ def do_step(agent, env, state, callback=None, must_remember=True):
     return action, reward, next_state, ended
 
 
+def obs2tensor(observations):
+    if type(observations) is not torch.Tensor:
+        obs_tensor = torch.tensor(observations, dtype=torch.float32
+                                  ).unsqueeze(0)
+    else:
+        obs_tensor = observations
+    return obs_tensor
+
+
 def run_agent(agent, env, training_steps, mem_steps, train_frequency,
               target_update_steps, eval_interval, eval_epsilon, eval_steps,
               outpath, step_callback=None):
@@ -119,7 +128,7 @@ def run_agent(agent, env, training_steps, mem_steps, train_frequency,
             agent.update()
 
         if step % target_update_steps == 0:
-            agent.update_target_network()
+            agent.update_target()
 
         ep_reward += reward
         state = next_state
@@ -153,6 +162,7 @@ def run_agent(agent, env, training_steps, mem_steps, train_frequency,
             total_reward += ep_reward
             summary().add_scalar('Learning/EpReward', ep_reward, total_iterations)
             summary().add_scalar('Learning/EpNumberSteps', ep_steps, total_iterations)
+            summary().flush()
 
     summary().close()
     return total_reward, total_episodes
