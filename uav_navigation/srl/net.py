@@ -76,23 +76,77 @@ def q_function(latent_dim, action_shape, hidden_dim, num_layers=2):
     return MLP(latent_dim, action_shape[0], hidden_dim, num_layers=num_layers)
 
 
+def slowness_cost(output_batch, lambda_=0.1):
+    """
+    Compute the slowness cost for a batch of output sequences.
+
+    Parameters:
+    - output_batch: A 2D PyTorch tensor representing the batch of output sequences.
+                    Each row represents one output sequence.
+    - lambda_: A regularization parameter controlling the strength of the penalty.
+
+    Returns:
+    - slowness: The average slowness cost over the batch.
+    """
+    batch_size = output_batch.size(0)
+    slowness_total = 0.0
+
+    for i in range(batch_size):
+        output_sequence = output_batch[i]
+        squared_diffs = torch.square(torch.diff(output_sequence))
+        slowness_total += lambda_ * torch.sum(squared_diffs)
+
+    slowness = slowness_total / batch_size
+    return slowness
+
+
+def variability_cost(encoded_batch):
+    """
+    Compute the variability loss for a batch of encoded representations.
+
+    Parameters:
+    - encoded_batch: A 2D PyTorch tensor representing the batch of encoded representations.
+                     Each row represents one encoded representation.
+
+    Returns:
+    - variability: The variability loss.
+    """
+    mean_encoded = torch.mean(encoded_batch, dim=0)
+    variance = torch.mean(torch.square(encoded_batch - mean_encoded))
+    return variance
+
+
 class MLP(nn.Module):
     """MLP for q-function."""
 
     def __init__(self, n_input, n_output, hidden_dim, num_layers=2):
         super().__init__()
-
-        # self.feature_dim = n_output
         self.num_layers = num_layers
-        self.h_layers = nn.ModuleList([nn.Linear(n_input, hidden_dim)])
+        if type(n_input) != int and len(n_input) == 2:
+            first_layer = nn.Conv1d(n_input[0], hidden_dim,
+                                    kernel_size=n_input[-1])
+        else:
+            first_layer = nn.Linear(n_input, hidden_dim)
+        self.h_layers = nn.ModuleList([first_layer])
         for i in range(num_layers - 1):
             self.h_layers.append(nn.Linear(hidden_dim, hidden_dim))
-        self.h_layers.append(nn.Linear(hidden_dim, n_output))
+        if type(n_output) != int and len(n_output) == 2:
+            last_layer = nn.ConvTranspose1d(hidden_dim, n_output[0],
+                                            kernel_size=n_output[-1])
+        else:
+            last_layer = nn.Linear(hidden_dim, n_output)
+
+        self.h_layers.append(last_layer)
 
     def forward(self, obs, detach=False):
         h = self.h_layers[0](obs)
+        if isinstance(self.h_layers[0], nn.Conv1d):
+            h = h.squeeze(2)
         for i in range(self.num_layers):
-            h = torch.relu(self.h_layers[i+1](h))
+            layer = self.h_layers[i+1]
+            if isinstance(layer, nn.ConvTranspose1d):
+                h = h.unsqueeze(2)
+            h = torch.relu(layer(h))
 
         if detach:
             h = h.detach()
@@ -105,12 +159,9 @@ class PixelEncoder(nn.Module):
 
     def __init__(self, state_shape, latent_dim, num_layers=2, num_filters=32):
         super().__init__()
-
         assert len(state_shape) == 3
-
         self.feature_dim = latent_dim
         self.num_layers = num_layers
-
         self.convs = nn.ModuleList(
             [nn.Conv2d(state_shape[0], num_filters, 3, stride=2)]
         )

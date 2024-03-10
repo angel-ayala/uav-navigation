@@ -21,14 +21,31 @@ from uav_navigation.srl.net import q_function
 from uav_navigation.agent import DDQNAgent
 from uav_navigation.agent import QFunction
 from uav_navigation.net import QNetwork, QFeaturesNetwork
+from uav_navigation.memory import ReplayBuffer, PrioritizedReplayBuffer
 
 from uav_navigation.utils import save_dict_json
 from uav_navigation.utils import run_agent
-from uav_navigation.memory import ReplayBuffer, PrioritizedReplayBuffer
+from uav_navigation.utils import ReducedVectorObservation
+from uav_navigation.stack import ObservationStack
 
 
 from webots_drone.envs.preprocessor import MultiModalObservation
 from webots_drone.data import StoreStepData
+from webots_drone.envs.preprocessor import TargetVectorObservation
+
+
+def list_of_float(arg):
+    return list(map(float, arg.split(',')))
+
+
+def list_of_int(arg):
+    return list(map(int, arg.split(',')))
+
+
+def xy_coordinates(arg):
+    if arg.lower() == 'random':
+        return None
+    return list_of_float(arg)
 
 
 def parse_args():
@@ -36,7 +53,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
 
     arg_env = parser.add_argument_group('Environment')
-    arg_env.add_argument("--time-limit", type=int, default=60,
+    arg_env.add_argument("--time-limit", type=int, default=600,  # 10m
                          help='Max time (seconds) of the mission.')
     arg_env.add_argument("--time-no-action", type=int, default=5,
                          help='Max time (seconds) with no movement.')
@@ -48,11 +65,11 @@ def parse_args():
                          help='Minimum distance from the target.')
     arg_env.add_argument("--init-altitude", type=float, default=25.,
                          help='Minimum height distance to begin the mission.')
-    arg_env.add_argument("--altitude-limits", type=list[float],
+    arg_env.add_argument("--altitude-limits", type=list_of_float,
                          default=[11., 75.], help='Vertical flight limits.')
-    arg_env.add_argument("--target-pos", type=list[float], default=[-40., 40.],
-                         help='Initial position of the target.')
-    arg_env.add_argument("--target-dim", type=list[float], default=[7., 3.5],
+    arg_env.add_argument("--target-pos", type=int, default=None,
+                         help='Cuadrant number for target position.')
+    arg_env.add_argument("--target-dim", type=list_of_float, default=[7., 3.5],
                          help="Target's dimension size.")
     arg_env.add_argument("--is-pixels", action='store_true',
                          help='Whether if reconstruct an image-based observation.')
@@ -60,13 +77,19 @@ def parse_args():
                          help='Whether if reconstruct a vector-based observation.')
     arg_env.add_argument("--is-pose", action='store_true',
                          help='Whether if reconstruct the pose observation.')
+    arg_env.add_argument("--add-target", action='store_true',
+                         help='Whether if add the target info to vector state.')
 
     arg_agent = parser.add_argument_group('Agent')
-    arg_agent.add_argument("--approximator-lr", type=float, default=25e-5,
-                           help='Q approximation function Adam learning rate.')
+    arg_agent.add_argument("--approximator-lr", type=float, default=10e-5,
+                           help='Q approximation function SGD learning rate.'
+                           'default value is recommended in: '
+                           '[Interference and Generalization in Temporal '
+                           'Difference Learning]('
+                           'https://proceedings.mlr.press/v119/bengio20a.html )')
     arg_agent.add_argument("--approximator-beta", type=float, default=0.9,
                            help='Q approximation function Adam \beta.')
-    arg_agent.add_argument("--approximator-tau", type=float, default=0.005,
+    arg_agent.add_argument("--approximator-tau", type=float, default=0.1,
                            help='Soft target update \tau.')
     arg_agent.add_argument("--discount-factor", type=float, default=0.99,
                            help='Discount factor \gamma.')
@@ -74,9 +97,9 @@ def parse_args():
                            help='Initial epsilon value for exploration.')
     arg_agent.add_argument("--epsilon-end", type=float, default=0.01,
                            help='Final epsilon value for exploration.')
-    arg_agent.add_argument("--epsilon-steps", type=int, default=500000,
+    arg_agent.add_argument("--epsilon-steps", type=int, default=90000,  # 5h at 25 frames
                            help='Number of steps to reach minimum value for Epsilon.')
-    arg_agent.add_argument("--memory-capacity", type=int, default=2048,
+    arg_agent.add_argument("--memory-capacity", type=int, default=65536,  # 2**16
                            help='Maximum number of transitions in the Experience replay buffer.')
     arg_agent.add_argument("--memory-prioritized", action='store_true',
                            help='Whether if memory buffer is Prioritized experiencie replay or not.')
@@ -84,6 +107,9 @@ def parse_args():
                            help='Alpha prioritization exponent for PER.')
     arg_agent.add_argument("--prioritized-initial-beta", type=float, default=0.4,
                            help='Beta bias for sampling for PER.')
+    arg_agent.add_argument("--approximator-momentum", type=float, default=.9,
+                           help='Momentum factor factor for the SGD using'
+                           'using nesterov')
 
     arg_srl = parser.add_argument_group(
         'State representation learning variation')
@@ -107,18 +133,20 @@ def parse_args():
                          help='Decoder function Adam weight decay value.')
 
     arg_training = parser.add_argument_group('Training')
-    arg_training.add_argument("--steps", type=int, default=1000000,
+    arg_training.add_argument("--steps", type=int, default=450000,  # 25h at 25 frames
                               help='Number of training steps.')
     arg_training.add_argument('--memory-steps', type=int, default=2048,
                               help='Number of steps for initial population of the Experience replay buffer.')
     arg_training.add_argument("--train-frequency", type=int, default=4,
                               help='Steps interval for Q-network batch training.')
-    arg_training.add_argument("--target-update-frequency", type=int, default=100,
+    arg_training.add_argument("--target-update-frequency", type=int, default=1500,  # 5m at 25 frames
                               help='Steps interval for target network update.')
-    arg_training.add_argument('--eval-interval', type=int, default=10000,
+    arg_training.add_argument('--eval-interval', type=int, default=9000,  # 30m at 25 frames
                               help='Steps interval for progress evaluation.')
     arg_training.add_argument('--eval-epsilon', type=float, default=0.01,
                               help='Epsilon value used for evaluation.')
+    arg_training.add_argument('--eval-steps', type=int, default=300,  # 1m at 25 frames
+                              help='Number of evaluation steps.')
 
     arg_utils = parser.add_argument_group('Utils')
     arg_utils.add_argument('--use-cuda', action='store_true',
@@ -156,6 +184,12 @@ if __name__ == '__main__':
 
     # Create the environment
     env = gym.make(environment_name, **env_params)
+    if not args.is_pixels:
+        env = ReducedVectorObservation(env)
+    
+    if args.add_target:
+        env_params['add_target'] = True
+        env = TargetVectorObservation(env)
 
     # Observation preprocessing
     rgb_shape = (3, 84, 84)
@@ -175,7 +209,12 @@ if __name__ == '__main__':
     if args.frame_stack > 1 and not is_multimodal:
         env = gym.wrappers.FrameStack(env, num_stack=args.frame_stack)
 
+    env_params['frame_stack'] = args.frame_stack
+    if args.frame_stack > 1:
+        env = ObservationStack(env, k=args.frame_stack)
+
     # Agent args
+    state_shape = env.observation_space.shape
     agent_params = dict(
         state_shape=state_shape,
         action_shape=(env.action_space.n, ),
@@ -189,7 +228,7 @@ if __name__ == '__main__':
     ae_models = dict()
     approximator_params = dict(
         learning_rate=args.approximator_lr,
-        adam_beta1=args.approximator_beta,
+        momentum=args.approximator_momentum,
         tau=args.approximator_tau,
         use_cuda=args.use_cuda)
 
@@ -292,6 +331,7 @@ if __name__ == '__main__':
         target_update_steps=args.target_update_frequency,
         eval_interval=args.eval_interval,
         eval_epsilon=args.eval_epsilon,
+        eval_steps=args.eval_steps,
         outpath=outfolder)
     # update data for log output
     run_params_save = run_params.copy()

@@ -15,6 +15,16 @@ from uav_navigation.agent import DDQNAgent
 from uav_navigation.utils import profile_model
 from .net import weight_init
 from .autoencoder import AEModel
+from uav_navigation.memory import PrioritizedReplayBuffer
+from uav_navigation.logger import summary_scalar, summary
+from .net import weight_init
+from .net import slowness_cost
+from .net import variability_cost
+from .net import MLP
+from .net import VectorApproximator
+from .net import PixelApproximator
+from .autoencoder import PixelDecoder
+from .autoencoder import preprocess_obs
 
 
 def profile_agent(agent, state_space_shape, action_space_shape):
@@ -223,6 +233,7 @@ class SRLDDQNAgent(DDQNAgent):
                 self.update_representation(sampled_data[0][0])
             else:
                 self.update_representation(sampled_data[0])
+            summary().flush()
 
     def save(self, path):
         self.approximator.save(path, ae_models=self.ae_models.items())

@@ -13,6 +13,7 @@ from thop import clever_format
 from .utils import profile_model
 from .utils import soft_update_params
 from .memory import is_prioritized_memory
+from .logger import summary_scalar
 
 
 def profile_agent(agent, state_space_shape, action_space_shape):
@@ -31,7 +32,7 @@ def profile_agent(agent, state_space_shape, action_space_shape):
 class QFunction:
 
     def __init__(self, q_app_fn, q_app_params, learning_rate=1e-3,
-                 adam_beta1=0.9, tau=0.005, use_cuda=True):
+                 momentum=0.9, tau=0.005, use_cuda=True):
 
         self.device = 'cuda'\
             if torch.cuda.is_available() and use_cuda else 'cpu'
@@ -47,9 +48,34 @@ class QFunction:
 
         # optimization function
         self.loss_fn = nn.SmoothL1Loss(reduction='none')
-        self.optimizer = optim.Adam(self.q_network.parameters(),
-                                    lr=learning_rate,
-                                    betas=(adam_beta1, 0.999))
+        self.optimizer = optim.SGD(self.q_network.parameters(),
+                                   lr=approximator_lr,
+                                   momentum=momentum,
+                                   nesterov=True)
+
+        # Replay Buffer
+        self.memory = memory_buffer
+        self.update_epsilon(0)
+
+    def select_action(self, state):
+        # Choose action using epsilon-greedy policy
+        if np.random.rand() < self.epsilon:
+            return np.random.randint(self.action_space_size)  # Explore
+        else:
+            state_tensor = torch.tensor(np.array(state), 
+                                        dtype=torch.float32,
+                                        device=self.device).unsqueeze(0)
+            with torch.no_grad():
+                q_values = self.q_network(state_tensor).cpu().numpy()
+            return np.argmax(q_values)  # Exploit
+
+    def update_epsilon(self, n_step):
+        # Anneal exploration rate
+        self.epsilon = max(self.epsilon_end,
+                           self.epsilon_start - (self.epsilon_decay * n_step))
+        summary_scalar('Agent/Epsilon', self.epsilon)
+        if isinstance(self.memory, PrioritizedReplayBuffer):
+            self.memory.update_beta(n_step)
 
     def update_target_network(self):
         # Soft update the target network
@@ -99,6 +125,8 @@ class QFunction:
         return td_targets
 
     def optimize(self, td_loss):
+        # loss = torch.mean(losses)
+        summary_scalar('Loss/Q-value', td_loss.item())
         self.optimizer.zero_grad()
         td_loss.backward()
         self.optimizer.step()
@@ -110,8 +138,8 @@ class QFunction:
             'optimizer_state_dict': self.optimizer.state_dict(),
         }, path)
 
-    def load(self, path, eval_only=False):
-        checkpoint = torch.load(path)
+    def load(self, path):
+        checkpoint = torch.load(path, map_location=self.device)
         self.q_network.load_state_dict(checkpoint['q_network_state_dict'])
         self.target_q_network.load_state_dict(checkpoint['target_q_network_state_dict'])
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])

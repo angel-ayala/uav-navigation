@@ -1,15 +1,23 @@
 #!/bin/bash
-# pixel-based DDQN
-python learn.py --is-pixels
+# DDQN vector-based (13, )
+python learn.py --memory-prioritized
+# DDQN image-based (3, 84, 84)
+python learn.py --memory-prioritized --is-pixels --use-cuda
+# DDQN-SRL vector-based (13, )
+python learn.py --memory-prioritized --is-srl
+# DDQN-SRL image-based (3, 84, 84)
+python learn.py --memory-prioritized --is-srl --is-pixels --use-cuda
 
-# pixel-based DDQN DEBUG
-python learn.py --is-pixels --steps 1000 --eval-interval 100 --epsilon-steps 500 --memory-steps 64 --target-update-frequency 10 --use-cuda
-
-# pixel-based DDQN-SRL
-python learn.py --is-pixels --is-srl --use-cuda
-
-# vector-based DDQN
-python learn.py
-
-# vector-based DDQN-SRL
-python learn.py --is-srl --hidden-dim 64 --num-layers 1
+# DDQN DEBUG
+python learn.py \
+--steps 3000 \
+--eval-interval 300 \
+--eval-steps 300 \
+--epsilon-steps 1000 \
+--target-update-frequency 300 \
+--memory-capacity 2048 \
+--memory-steps 32 \
+--memory-prioritized \
+--frame-stack 3 \
+--is-pixels --use-cuda \
+--is-srl

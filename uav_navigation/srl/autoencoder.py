@@ -88,6 +88,19 @@ class AEModel:
         latent_loss = (0.5 * h.pow(2).sum(1)).mean()
 
         rloss = rec_loss + decoder_latent_lambda * latent_loss
+
+        # # Compute slowness cost
+        # slowness_loss = slowness_cost(h)
+        # loss += slowness_loss
+        # # Compute variability cost
+        # variability_loss = variability_cost(h)
+        # loss += variability_loss
+        # summary_scalar('Loss/Slowness', slowness_loss.item())
+        # summary_scalar('Loss/Variability', variability_loss.item())
+        # summary_scalar('Loss/Decoder', rec_loss.item())
+        # summary_scalar('Loss/Encoder', latent_loss.item())
+        # summary_scalar('Loss/AutoEncoder', loss.item())
+
         # encoder optimizer
         self.encoder_optim.zero_grad()
         # decoder optimizer

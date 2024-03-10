@@ -14,7 +14,9 @@ import torch
 from thop import profile
 from tqdm import tqdm
 
-from webots_drone.utils import min_max_norm
+from .logger import summary
+from .logger import summary_create
+from .logger import summary_step
 
 
 def profile_model(model, input_shape, device):
@@ -69,11 +71,13 @@ def do_step(agent, env, state, callback=None, must_remember=True):
 
 
 def run_agent(agent, env, training_steps, mem_steps, train_frequency,
-              target_update_steps, eval_interval, eval_epsilon, outpath,
-              step_callback=None):
+              target_update_steps, eval_interval, eval_epsilon, eval_steps,
+              outpath, step_callback=None):
+    summary_create(outpath / 'logs')
     ended = True
     total_reward = 0
     total_episodes = 1
+    total_iterations = 0
     ep_reward = 0
     ep_steps = 0
     timemark = time.time()
@@ -98,7 +102,9 @@ def run_agent(agent, env, training_steps, mem_steps, train_frequency,
                 leave=False, unit='step',
                 bar_format='{desc}: {n:04d}|{bar}|[{rate_fmt}]')
     for step in range(training_steps):
+        summary_step(step)
         if ended:
+            total_iterations += 1
             ep_reward = 0
             ep_steps = 0
             state, info = env.reset()
@@ -113,11 +119,12 @@ def run_agent(agent, env, training_steps, mem_steps, train_frequency,
             agent.update()
 
         if step % target_update_steps == 0:
-            agent.update_target()
+            agent.update_target_network()
 
         ep_reward += reward
         state = next_state
         ep_steps += 1
+        summary().add_scalar('Learning/StepReward', reward, step)
 
         agent.update_epsilon(step)
         tbar.update(1)
@@ -126,11 +133,15 @@ def run_agent(agent, env, training_steps, mem_steps, train_frequency,
             elapsed_time = time.time() - timemark
             tbar.clear()
             print(f"Episode {total_episodes:03d}\n- Learning: {elapsed_time:.3f} seconds\tR: {ep_reward:.4f}\tS: {ep_steps}")
-            agent.save(outpath / f"agent_ep_{total_episodes:03d}")
-            eval_reward, eval_steps, eval_time = evaluate_agent(
-                agent, env, eval_epsilon, step_callback)
+            agent.save(outpath / f"agent_ep_{total_episodes:03d}.pth")
+            if eval_steps > 0:
+                for fc in range(4):
+                    e_reward, e_steps, e_time = evaluate_agent(
+                        agent, env, eval_epsilon, eval_steps, fire_cuadrant=fc,
+                        step_callback=step_callback)
+                    summary().add_scalar(f"Evaluation/EpRewardC{fc}", e_reward, total_episodes)
+                    summary().add_scalar(f"Evaluation/EpNumberStepsC{fc}", e_steps, total_episodes)
             total_episodes += 1
-            total_reward += ep_reward
             tbar.reset()
             tbar.set_description(f"Episode {total_episodes:03d}")
             ended = True
@@ -138,12 +149,18 @@ def run_agent(agent, env, training_steps, mem_steps, train_frequency,
                 step_callback.new_episode()
             timemark = time.time()
 
+        if ended:
+            total_reward += ep_reward
+            summary().add_scalar('Learning/EpReward', ep_reward, total_iterations)
+            summary().add_scalar('Learning/EpNumberSteps', ep_steps, total_iterations)
+
+    summary().close()
     return total_reward, total_episodes
 
 
-def evaluate_agent(agent, env, eval_epsilon, step_callback=None):
+def evaluate_agent(agent, env, eval_epsilon, eval_steps, fire_cuadrant=2, step_callback=None):
     timemark = time.time()
-    state, info = env.reset()
+    state, info = env.reset(fire_cuadrant=fire_cuadrant)
     ep_reward = 0
     ep_steps = 0
     end = False
@@ -162,6 +179,8 @@ def evaluate_agent(agent, env, eval_epsilon, step_callback=None):
         ep_reward += reward
         sys.stdout.write(f"\rR: {ep_reward:.4f}\tS: {ep_steps}")
         sys.stdout.flush()
+        if ep_steps == eval_steps:
+            end = True
 
     elapsed_time = time.time() - timemark
     sys.stdout.flush()
@@ -171,30 +190,23 @@ def evaluate_agent(agent, env, eval_epsilon, step_callback=None):
     return ep_reward, ep_steps, elapsed_time
 
 
-class PreprocessObservation(gym.Wrapper):
-    def __init__(self, env: gym.Env, is_pixels=True):
+class ReducedVectorObservation(gym.Wrapper):
+    def __init__(self, env: gym.Env):
         super().__init__(env)
-        if is_pixels:
-            self.preprocess_fn = self.preprocess_pixels
-        else:
-            self.preprocess_fn = self.preprocess_vector
+        self.obs_shape = (13, )
+        self.obs_type = np.float32
+        self.observation_space = gym.spaces.Box(low=float('-inf'),
+                                                high=float('inf'),
+                                                shape=self.obs_shape,
+                                                dtype=self.obs_type)
+    def observation(self, obs):
+        return obs[:13]
 
     def step(self, action):
         obs, rews, terminateds, truncateds, infos = self.env.step(action)
-        return self.preprocess_fn(obs), rews, terminateds, truncateds, infos
+        return self.observation(obs), rews, terminateds, truncateds, infos
 
     def reset(self, **kwargs):
-        """Resets the environment and normalizes the observation."""
         obs, info = self.env.reset(**kwargs)
 
-        return self.preprocess_fn(obs), info
-
-    def preprocess_pixels(self, obs):
-        return obs.astype(np.float32) / 255.
-
-    def preprocess_vector(self, obs):
-        # Normalize angular values
-        obs[3] = min_max_norm(obs[3], a=-1, b=1, minx=-np.pi, maxx=np.pi)
-        obs[4] = min_max_norm(obs[4], a=-1, b=1, minx=-np.pi/2, maxx=np.pi/2)
-        obs[5] = min_max_norm(obs[5], a=-1, b=1, minx=-np.pi, maxx=np.pi)
-        return obs
+        return self.observation(obs), info

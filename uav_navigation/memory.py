@@ -5,6 +5,7 @@ Created on Wed Jan 17 14:28:32 2024
 """
 import torch
 import numpy as np
+from .logger import summary_scalar
 
 
 def is_prioritized_memory(memory):
@@ -207,6 +208,7 @@ class PrioritizedReplayBuffer(ReplayBuffer):
     def update_beta(self, n_step):
         # Anneal rate
         self.beta = min(1.0, self.beta_start + (self.beta_rate * n_step))
+        summary_scalar('Agent/MemoryBeta', self.beta)
 
     def add(self, state, action, reward, next_state, done):
         # Get next available slot
