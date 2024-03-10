@@ -198,25 +198,3 @@ def evaluate_agent(agent, env, eval_epsilon, eval_steps, fire_cuadrant=2, step_c
     sys.stdout.flush()
     agent.epsilon = curr_epsilon
     return ep_reward, ep_steps, elapsed_time
-
-
-class ReducedVectorObservation(gym.Wrapper):
-    def __init__(self, env: gym.Env):
-        super().__init__(env)
-        self.obs_shape = (13, )
-        self.obs_type = np.float32
-        self.observation_space = gym.spaces.Box(low=float('-inf'),
-                                                high=float('inf'),
-                                                shape=self.obs_shape,
-                                                dtype=self.obs_type)
-    def observation(self, obs):
-        return obs[:13]
-
-    def step(self, action):
-        obs, rews, terminateds, truncateds, infos = self.env.step(action)
-        return self.observation(obs), rews, terminateds, truncateds, infos
-
-    def reset(self, **kwargs):
-        obs, info = self.env.reset(**kwargs)
-
-        return self.observation(obs), info

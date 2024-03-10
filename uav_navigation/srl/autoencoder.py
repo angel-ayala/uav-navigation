@@ -12,6 +12,10 @@ from .net import preprocess_obs
 from .net import rgb_reconstruction_model
 from .net import vector_reconstruction_model
 from .net import imu2pose_model
+from .net import slowness_cost
+from .net import variability_cost
+from .net import proportionality_cost
+from .net import repeatability_cost
 from uav_navigation.logger import summary_scalar
 
 
@@ -89,6 +93,43 @@ class AEModel:
         for dec in self.decoder:
             dec.apply(function)
 
+    def encoder_slowness(self, h):
+        # Compute slowness cost
+        slowness_loss = slowness_cost(h)
+        summary_scalar(f'Loss/{self.type}/Encoder/Slowness', slowness_loss.item())
+        return slowness_loss
+
+    def encoder_variability(self, h):
+        # Compute slowness cost
+        variability_loss = variability_cost(h)
+        summary_scalar(f'Loss/{self.type}/Encoder/Variability', variability_loss.item())
+        return variability_loss
+
+    def encoder_proportionality(self, h, actions):
+        # Compute slowness cost
+        proportionality_loss = proportionality_cost(h, actions)
+        summary_scalar(f'Loss/{self.type}/Encoder/Proportionality', proportionality_loss.item())
+        return proportionality_loss
+
+    def encoder_repeatability(self, h, actions):
+        # Compute slowness cost
+        repeatability_loss = repeatability_cost(h, actions)
+        summary_scalar(f'Loss/{self.type}Encoder/Repeatibility', repeatability_loss.item())
+        return repeatability_loss
+
+    def update_encoder(self, obs, actions):
+        actions_argmax = actions.argmax(-1)
+        _, h = self.reconstruct_obs(obs)
+        enc_loss = self.encoder_slowness(h) 
+        enc_loss += self.encoder_variability(h)
+        enc_loss += self.encoder_proportionality(h, actions_argmax)
+        enc_loss += self.encoder_repeatability(h, actions_argmax)
+        summary_scalar(f'Loss/{self.type}/Encoder/S+V+P+R', enc_loss.item())
+
+        self.encoder_optim.zero_grad()
+        enc_loss.backward()
+        self.encoder_optim.step()
+        
     def optimize_reconstruction(self, obs, decoder_latent_lambda):
         rec_obs, h = self.reconstruct_obs(obs)
 
@@ -97,25 +138,15 @@ class AEModel:
         # preprocess images to be in [-0.5, 0.5] range
         target_obs = preprocess_obs(obs)
         rec_loss = F.mse_loss(target_obs, rec_obs)
+        summary_scalar(f'Loss/{self.type}/Reconstruction/Decoder', rec_loss.item())
 
         # add L2 penalty on latent representation
         # see https://arxiv.org/pdf/1903.12436.pdf
         latent_loss = (0.5 * h.pow(2).sum(1)).mean()
+        summary_scalar(f'Loss/{self.type}/Reconstruction/EncoderActivation', latent_loss.item())
 
         rloss = rec_loss + decoder_latent_lambda * latent_loss
-
-        summary_scalar('Loss/Decoder', rec_loss.item())
-        summary_scalar('Loss/Encoder', latent_loss.item())
-        summary_scalar('Loss/Reconstruction', rloss.item())
-
-        # # Compute slowness cost
-        # slowness_loss = slowness_cost(h)
-        # loss += slowness_loss
-        # summary_scalar('Loss/Slowness', slowness_loss.item())
-        # # Compute variability cost
-        # variability_loss = variability_cost(h)
-        # loss += variability_loss
-        # summary_scalar('Loss/Variability', variability_loss.item())
+        summary_scalar(f'Loss/{self.type}/Reconstruction', rloss.item())
 
         # encoder optimizer
         self.encoder_optim.zero_grad()
@@ -141,18 +172,25 @@ class AEModel:
             # preprocess images to be in [-0.5, 0.5] range
             target_obs = preprocess_obs(obs_vector)
             target_att, target_pos = target_obs[:, :6], target_obs[:, 6:12]
-        att_loss = F.mse_loss(target_att, rec_att)
 
         # add L2 penalty on latent representation
         # see https://arxiv.org/pdf/1903.12436.pdf
         latent_loss = (0.5 * h.pow(2).sum(1)).mean()
+        summary_scalar(f'Loss/{self.type}/EncoderActivation', latent_loss.item())
 
         # inertial gradients
+        att_loss = F.mse_loss(target_att, rec_att)
+        summary_scalar(f'Loss/{self.type}/AttitudeDecoder', att_loss.item())
+
         r_att_loss = att_loss + decoder_latent_lambda * latent_loss
+        summary_scalar(f'Loss/{self.type}/AttitudeReconstruction', r_att_loss.item())
 
         # position gradients
         pos_loss = F.mse_loss(target_pos, rec_pos)
-        r_pos_loss = pos_loss + decoder_latent_lambda * latent_loss
+        summary_scalar(f'Loss/{self.type}/PositionDecoder', pos_loss.item())
+
+        r_pos_loss = pos_loss + decoder_latent_lambda * latent_loss        
+        summary_scalar(f'Loss/{self.type}/PositionReconstruction', r_pos_loss.item())
 
         # encoder optimizer
         self.encoder_optim.zero_grad()

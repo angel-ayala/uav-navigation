@@ -14,24 +14,17 @@ import gym
 import datetime
 from pathlib import Path
 
-from uav_navigation.srl.agent import SRLDDQNAgent
-from uav_navigation.srl.agent import SRLFunction
-from uav_navigation.srl.net import q_function
-
-from uav_navigation.agent import DDQNAgent
-from uav_navigation.agent import QFunction
+from uav_navigation.agent import DDQNAgent, QFunction
 from uav_navigation.net import QNetwork, QFeaturesNetwork
+from uav_navigation.srl.agent import SRLDDQNAgent, SRLFunction
+from uav_navigation.srl.net import q_function
 from uav_navigation.memory import ReplayBuffer, PrioritizedReplayBuffer
+from uav_navigation.utils import save_dict_json, run_agent
 
-from uav_navigation.utils import save_dict_json
-from uav_navigation.utils import run_agent
-from uav_navigation.utils import ReducedVectorObservation
-from uav_navigation.stack import ObservationStack
-
-
-from webots_drone.envs.preprocessor import MultiModalObservation
 from webots_drone.data import StoreStepData
+from webots_drone.envs.preprocessor import MultiModalObservation
 from webots_drone.envs.preprocessor import TargetVectorObservation
+from webots_drone.stack import ObservationStack
 
 
 def list_of_float(arg):
@@ -184,10 +177,6 @@ if __name__ == '__main__':
 
     # Create the environment
     env = gym.make(environment_name, **env_params)
-    
-    if args.add_target:
-        env_params['add_target'] = True
-        env = TargetVectorObservation(env)
 
     # Observation preprocessing
     rgb_shape = (3, 84, 84)
@@ -197,17 +186,21 @@ if __name__ == '__main__':
     state_shape = rgb_shape if args.is_pixels else vector_shape
 
     if is_multimodal:
-        env = MultiModalObservation(env,
-                                    shape1=rgb_shape,
-                                    shape2=vector_shape,
-                                    frame_stack=args.frame_stack)
+        env = MultiModalObservation(env, shape1=rgb_shape, shape2=vector_shape,
+                                    frame_stack=args.frame_stack,
+                                    add_target=args.add_target)
         state_shape = (env.observation_space[0].shape,
                        env.observation_space[1].shape)
+    else:
+        add_target = False
+        if args.add_target and not args.is_pixels:
+            add_target = True
+            env = TargetVectorObservation(env)
+        env_params['add_target'] = add_target
 
-    if args.frame_stack > 1 and not is_multimodal:
-        env = ObservationStack(env, k=args.frame_stack)
-
-    env_params['frame_stack'] = args.frame_stack
+        if args.frame_stack > 1:
+            env = ObservationStack(env, k=args.frame_stack)
+            env_params['frame_stack'] = args.frame_stack
 
     # Agent args
     state_shape = env.observation_space.shape

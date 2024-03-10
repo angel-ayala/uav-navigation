@@ -54,18 +54,6 @@ class QFunction:
                                    momentum=momentum,
                                    nesterov=True)
 
-    def select_action(self, state):
-        # Choose action using epsilon-greedy policy
-        if np.random.rand() < self.epsilon:
-            return np.random.randint(self.action_space_size)  # Explore
-        else:
-            state_tensor = torch.tensor(np.array(state), 
-                                        dtype=torch.float32,
-                                        device=self.device).unsqueeze(0)
-            with torch.no_grad():
-                q_values = self.q_network(state_tensor).cpu().numpy()
-            return np.argmax(q_values)  # Exploit
-
     def update_target_network(self):
         # Soft update the target network
         soft_update_params(net=self.q_network,

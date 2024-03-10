@@ -25,7 +25,7 @@ from uav_navigation.agent import profile_agent
 from uav_navigation.utils import load_json_dict
 from uav_navigation.utils import evaluate_agent
 from uav_navigation.utils import ReducedVectorObservation
-from uav_navigation.stack import ObservationStack
+from webots_drone.stack import ObservationStack
 from learn import list_of_float
 from learn import list_of_int
 

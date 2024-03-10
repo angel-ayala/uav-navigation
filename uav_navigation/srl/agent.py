@@ -58,10 +58,8 @@ class SRLFunction(QFunction):
 
     def update_multimodal(self):
         ae_types = [m.type for m in self.models]
-        print('ae+models', ae_types)
         self.is_multimodal = "rgb" in ae_types and (
             "vector" in ae_types or "imu2pose" in ae_types)
-        print('multimodal', self.is_multimodal)
 
     def append_autoencoder(self, ae_model,
                            encoder_lr,
@@ -193,21 +191,26 @@ class SRLDDQNAgent(DDQNAgent):
 
         self.ae_models = ae_models
 
-    def update_representation(self, obs):
-        obs_2d = obs
+    def update_representation(self, obs, actions):
         if self.approximator.is_multimodal:
             obs_2d = obs[0]
             obs = obs[1]
+        else:
+            obs_2d = obs
+
         for ae_model in self.approximator.models:
             if ae_model.type in ["rgb"]:
                 ae_model.optimize_reconstruction(
                     obs_2d, self.approximator.decoder_latent_lambda)
+                ae_model.update_encoder(obs_2d, actions)
             if ae_model.type in ["vector"]:
                 ae_model.optimize_reconstruction(
                     obs, self.approximator.decoder_latent_lambda)
+                ae_model.update_encoder(obs, actions)
             if ae_model.type in ["imu2pose"]:
                 ae_model.optimize_pose(
                     obs, self.approximator.decoder_latent_lambda)
+                ae_model.update_encoder(obs, actions)
 
     def update(self):
         # Update the Q-network if replay buffer is sufficiently large
@@ -216,10 +219,9 @@ class SRLDDQNAgent(DDQNAgent):
                 self.BATCH_SIZE, device=self.approximator.device)
             self.update_approximator(sampled_data)
             # update the autoencoder
-            if self.is_prioritized:
-                self.update_representation(sampled_data[0][0])
-            else:
-                self.update_representation(sampled_data[0])
+            obs_data = sampled_data[0][0] if self.is_prioritized else sampled_data[0]
+            actions_data = sampled_data[0][1] if self.is_prioritized else sampled_data[1]
+            self.update_representation(obs_data, actions_data)
 
     def save(self, path):
         self.approximator.save(path, ae_models=self.ae_models.items())
