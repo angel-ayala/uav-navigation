@@ -21,7 +21,7 @@ from uav_navigation.logger import summary_scalar
 
 class AEModel:
 
-    def __init__(self, ae_type, ae_params):
+    def __init__(self, ae_type, ae_params, encoder_only=False):
         self.type = ae_type
         if ae_type == 'rgb':
             self.encoder, self.decoder = rgb_reconstruction_model(
@@ -44,7 +44,9 @@ class AEModel:
                 ae_params['latent_dim'],
                 num_layers=ae_params['num_layers'])
 
-        if type(self.decoder) is not tuple:
+        if encoder_only:
+            self.decoder = list()
+        elif type(self.decoder) is not tuple:
             self.decoder = [self.decoder]
 
     def adam_optimizer(self, encoder_lr, decoders_lr, decoder_weight_decay):
@@ -65,11 +67,14 @@ class AEModel:
                                        lr=encoder_lr,
                                        momentum=0.9,
                                        weight_decay=decoder_weight_decay)
-        self.decoder_optim = [optim.SGD(self.decoder[i].parameters(),
-                                        lr=decoder_lr,
-                                        momentum=0.9,
-                                        weight_decay=decoder_weight_decay)
-                              for i, decoder_lr in enumerate(decoders_lr)]
+        if len(self.decoder) > 0:
+            self.decoder_optim = [optim.SGD(self.decoder[i].parameters(),
+                                            lr=decoder_lr,
+                                            momentum=0.9,
+                                            weight_decay=decoder_weight_decay)
+                                  for i, decoder_lr in enumerate(decoders_lr)]
+        else:
+            self.decoder_optim = list()
 
     def to(self, device):
         self.encoder.to(device)

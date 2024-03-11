@@ -17,14 +17,15 @@ from .memory import is_prioritized_memory
 from .logger import summary_scalar
 
 
-def profile_agent(agent, state_space_shape, action_space_shape):
+def profile_q_approximator(approximator, state_shape, action_shape):
     # profile q-network
-    flops, params = profile_model(agent.q_network, state_space_shape,
-                                  agent.device)
+    q_network = approximator.q_network
+    target_q_network = approximator.target_q_network
+    device = approximator.device
+    flops, params = profile_model(q_network, state_shape, device)
     print('Q-network: {} flops, {} params'.format(
         *clever_format([flops, params], "%.3f")))
-    flops, params = profile_model(agent.target_q_network, state_space_shape,
-                                  agent.device)
+    flops, params = profile_model(target_q_network, state_shape, device)
     print('Target Q-network: {} flops, {} params'.format(
         *clever_format([flops, params], "%.3f")))
     return flops, params
@@ -112,11 +113,11 @@ class QFunction:
         self.q_network.load_state_dict(checkpoint['q_network_state_dict'])
         self.target_q_network.load_state_dict(checkpoint['target_q_network_state_dict'])
         if not eval_only:
-            # Ensure the models are in evaluation mode after loading
             self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         else:
-            self.target_q_network.eval()
+            # Ensure the models are in evaluation mode after loading
             self.q_network.eval()
+            self.target_q_network.eval()
 
 
 class DDQNAgent:

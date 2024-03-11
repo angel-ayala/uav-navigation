@@ -14,10 +14,10 @@ from pathlib import Path
 
 from uav_navigation.agent import DDQNAgent, QFunction
 from uav_navigation.net import QNetwork, QFeaturesNetwork
-from uav_navigation.agent import profile_agent
+from uav_navigation.agent import profile_q_approximator
 from uav_navigation.srl.agent import SRLDDQNAgent, SRLFunction
 from uav_navigation.srl.net import q_function
-from uav_navigation.srl.agent import profile_agent as profile_agent_srl
+from uav_navigation.srl.agent import profile_srl_approximator
 from uav_navigation.utils import load_json_dict
 from uav_navigation.utils import evaluate_agent
 
@@ -72,9 +72,8 @@ def run_evaluation(seed_val, logpath, episode):
 
     # Define constants
     logpath = Path(logpath)
-    agents_paths = [lp.name[:12] for lp in logpath.glob('**/agent_ep_*_q*')]
-    agents_paths.sort()
-    print(agents_paths)
+    agent_paths = [lp.name[:12] for lp in logpath.glob('**/agent_ep_*_q*')]
+    agent_paths.sort()
     episode = episode - 1
 
     # Environment args
@@ -122,40 +121,45 @@ def run_evaluation(seed_val, logpath, episode):
         if frame_stack > 1:
             env = ObservationStack(env, k=frame_stack)
 
-    if not env_params['is_pixels']:
-        env = ReducedVectorObservation(env)
-        if add_target:
-            env = TargetVectorObservation(env)
-    if frame_stack > 1:
-        env = ObservationStack(env, k=frame_stack)
-
     # Agent params
     agent_params = load_json_dict(logpath / 'args_agent.json')
     approximator_params = agent_params['approximator']
     if agent_params['is_srl']:
         agent_class = SRLDDQNAgent
         q_approximator = SRLFunction
-        agent_profiler = profile_agent_srl
+        function_profiler = profile_srl_approximator
         approximator_params['q_app_fn'] = q_function
         del agent_params['is_srl']
     else:
         agent_class = DDQNAgent
         q_approximator = QFunction
-        agent_profiler = profile_agent
+        function_profiler = profile_q_approximator
         approximator_params['q_app_fn'] = QFeaturesNetwork\
             if env_params['is_pixels'] else QNetwork
-    agent_params.update(
-        dict(approximator=q_approximator(**approximator_params)))
 
     print('state_shape', agent_params['state_shape'])
     print('action_shape', agent_params['action_shape'])
+    # Profile the approximation function computational costs
+    approximation_function = q_approximator(**approximator_params)
+    approximation_function.append_models(agent_params['ae_models'])
+    print('====== Full model computational demands ======')
+    function_profiler(approximation_function, agent_params['state_shape'],
+                      agent_params['action_shape'])
+    del approximation_function
+    # Profile encoder stage only computational costs
+    approximation_function = q_approximator(**approximator_params)
+    print('\n====== Reduced inference-only computational demands ======')
+    approximation_function.load(logpath / agent_paths[0],
+                                ae_models=agent_params['ae_models'],
+                                encoder_only=True)
+    function_profiler(approximation_function, agent_params['state_shape'],
+                      agent_params['action_shape'])
 
+    # Instantiate an init evaluation
     agent = agent_class(**agent_params)
-    agent_profiler(agent, agent_params['state_shape'],
-                   agent_params['action_shape'])
-    agent = agent_class(**agent_params)
+    agent_params['approximator'] = q_approximator(**approximator_params)
     training_params = load_json_dict(logpath / 'args_training.json')
-    for log_ep, agent_path in enumerate(agents_paths):
+    for log_ep, agent_path in enumerate(agent_paths):
         if episode > 0 and log_ep != episode:
             continue
         print('Loading from', "/".join(str(agent_path).split("/")[-3:]))

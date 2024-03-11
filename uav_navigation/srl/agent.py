@@ -12,18 +12,19 @@ import torch
 from thop import clever_format
 from uav_navigation.agent import QFunction
 from uav_navigation.agent import DDQNAgent
+from uav_navigation.agent import profile_q_approximator
 from uav_navigation.utils import profile_model
 from uav_navigation.utils import obs2tensor
 from .net import weight_init
 from .autoencoder import AEModel
 
 
-def profile_agent(agent, state_space_shape, action_space_shape):
+def profile_srl_approximator(approximator, state_shape, action_shape):
     total_flops, total_params = 0, 0
     q_feature_dim = 0
-    for m in agent.approximator.models:
+    for m in approximator.models:
         # profile encode stage
-        flops, params = profile_model(m.encoder, state_space_shape, agent.approximator.device)
+        flops, params = profile_model(m.encoder, state_shape, approximator.device)
         total_flops += flops
         total_params += params
         print('Encoder {}: {} flops, {} params'.format(
@@ -31,20 +32,17 @@ def profile_agent(agent, state_space_shape, action_space_shape):
         q_feature_dim += m.encoder.feature_dim
         # profile decode stage
         for i, decoder in enumerate(m.decoder):
-            flops, params = profile_model(decoder, m.encoder.feature_dim, agent.approximator.device)
+            flops, params = profile_model(decoder, m.encoder.feature_dim, approximator.device)
             total_flops += flops
             total_params += params
             print('Decoder {} {}: {} flops, {} params'.format(
                 i, m.type, *clever_format([flops, params], "%.3f")))
 
     # profile q-network
-    flops, params = profile_model(agent.approximator.q_network, q_feature_dim,
-                                  agent.approximator.device)
+    flops, params = profile_q_approximator(approximator, q_feature_dim,
+                                           action_shape)
     total_flops += flops
     total_params += params
-    print('QFunction: {} flops, {} params'.format(
-        *clever_format([flops, params], "%.3f")))
-    
     print('Total: {} flops, {} params'.format(
         *clever_format([total_flops, total_params], "%.3f")))
     return total_flops, total_params
@@ -74,6 +72,18 @@ class SRLFunction(QFunction):
         ae_model.sgd_optimizer(encoder_lr, decoder_lr, decoder_weight_decay)
         self.models.append(ae_model)
         self.update_multimodal()
+
+    def append_models(self, models):
+        # ensure empty list
+        if hasattr(self, 'models'):
+            del self.models
+        self.models = list()
+        for m, m_params in models.items():
+            # RGB observation reconstruction autoencoder model
+            ae_model = AEModel(m, m_params)
+            self.append_autoencoder(
+                ae_model, m_params['encoder_lr'], m_params['decoder_lr'],
+                m_params['decoder_weight_decay'])
 
     def compute_z(self, observations):
         z_hat = list()
@@ -133,36 +143,43 @@ class SRLFunction(QFunction):
             q_app_path = str(path) + f"_ae_{m}.pth"
             torch.save(state_dict, q_app_path)
 
-    def load(self, path, ae_models, encoder_only=False, eval_only=False):
+    def load(self, path, ae_models, eval_only=False, encoder_only=False):
         q_app_path = str(path) + "_q_function.pth"
         super().load(q_app_path, eval_only=eval_only)
 
-        for i, (m, _) in enumerate(ae_models):
-            ae_model = self.models[i]
+        # ensure empty list
+        if hasattr(self, 'models'):
+            del self.models
+        self.models = list()
+
+        for i, (m, m_params) in enumerate(ae_models.items()):
+            ae_model = AEModel(m, m_params, encoder_only=encoder_only)
+            self.append_autoencoder(
+                ae_model, m_params['encoder_lr'], m_params['decoder_lr'],
+                m_params['decoder_weight_decay'])
+            encoder, decoder = ae_model.encoder, ae_model.decoder
+            encoder_opt, decoder_opt = ae_model.encoder_optim, ae_model.decoder_optim
 
             q_app_path = str(path) + f"_ae_{m}.pth"
             checkpoint = torch.load(q_app_path, map_location=self.device)
 
-            ae_model.encoder.load_state_dict(checkpoint['encoder_state_dict'])
+            encoder.load_state_dict(checkpoint['encoder_state_dict'])
             if eval_only:
                 # Ensure the models are in evaluation mode after loading
-                ae_model.encoder.eval()
+                encoder.eval()
             else:
-                ae_model.encoder_optim.load_state_dict(
+                encoder_opt.load_state_dict(
                     checkpoint['encoder_optimizer_state_dict'])
-                ae_model.encoder_optim.eval()
 
             if not encoder_only:
-                for i, (d, dopt) in enumerate(
-                        zip(ae_model.decoder, ae_model.decoder_opt)):
+                for i, (d, dopt) in enumerate(zip(decoder, decoder_opt)):
                     d.load_state_dict(checkpoint[f"decoder_state_dict_{i}"])
-
-                if eval_only:
-                    # Ensure the models are in evaluation mode after loading
-                    d.eval()
-                else:
-                    dopt.load_state_dict(
-                        checkpoint[f"decoder_optimizer_state_dict_{i}"])
+                    if eval_only:
+                        # Ensure the models are in evaluation mode after loading
+                        d.eval()
+                    else:
+                        decoder_opt.load_state_dict(
+                            checkpoint[f"decoder_optimizer_state_dict_{i}"])
 
 
 class SRLDDQNAgent(DDQNAgent):
@@ -186,14 +203,10 @@ class SRLDDQNAgent(DDQNAgent):
             epsilon_steps=epsilon_steps,
             memory_buffer=memory_buffer)
 
-        for m, m_params in ae_models.items():
-            # RGB observation reconstruction autoencoder model
-            ae_model = AEModel(m, m_params)
-            self.approximator.append_autoencoder(
-                ae_model, m_params['encoder_lr'], m_params['decoder_lr'],
-                m_params['decoder_weight_decay'])
-
         self.ae_models = ae_models
+
+    def init_models(self):
+        self.approximator.append_models(self.ae_models)
 
     def update_representation(self, obs, actions):
         if self.approximator.is_multimodal:
@@ -227,9 +240,9 @@ class SRLDDQNAgent(DDQNAgent):
             actions_data = sampled_data[0][1] if self.is_prioritized else sampled_data[1]
             self.update_representation(obs_data, actions_data)
 
-    def save(self, path):
-        self.approximator.save(path, ae_models=self.ae_models.items())
+    def save(self, path, encoder_only=False):
+        self.approximator.save(path, ae_models=self.ae_models)
 
-    def load(self, path, eval_only=True):
-        self.approximator.load(path, ae_models=self.ae_models.items(),
-                               eval_only=eval_only)
+    def load(self, path, eval_only=True, encoder_only=False):
+        self.approximator.load(path, ae_models=self.ae_models,
+                               eval_only=eval_only, encoder_only=encoder_only)

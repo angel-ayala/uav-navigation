@@ -294,6 +294,7 @@ if __name__ == '__main__':
     memory_buffer = memory_class(**memory_params)
     agent_params.update(dict(memory_buffer=memory_buffer))
     agent = agent_class(**agent_params)
+    agent.init_models()
     # update params to save info
     memory_params.update(dict(is_prioritized=args.memory_prioritized))
     agent_params.update(dict(memory_buffer=memory_params))
