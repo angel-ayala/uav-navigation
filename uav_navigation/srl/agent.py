@@ -20,27 +20,31 @@ from .autoencoder import AEModel
 
 def profile_agent(agent, state_space_shape, action_space_shape):
     total_flops, total_params = 0, 0
-    encoder = agent.encoder
-    decoder = agent.decoder
-    # profile encode stage
-    flops, params = profile_model(encoder, state_space_shape, agent.device)
-    total_flops += flops
-    total_params += params
-    print('Encoder: {} flops, {} params'.format(
-        *clever_format([flops, params], "%.3f")))
+    q_feature_dim = 0
+    for m in agent.approximator.models:
+        # profile encode stage
+        flops, params = profile_model(m.encoder, state_space_shape, agent.approximator.device)
+        total_flops += flops
+        total_params += params
+        print('Encoder {}: {} flops, {} params'.format(
+            m.type, *clever_format([flops, params], "%.3f")))
+        q_feature_dim += m.encoder.feature_dim
+        # profile decode stage
+        for i, decoder in enumerate(m.decoder):
+            flops, params = profile_model(decoder, m.encoder.feature_dim, agent.approximator.device)
+            total_flops += flops
+            total_params += params
+            print('Decoder {} {}: {} flops, {} params'.format(
+                i, m.type, *clever_format([flops, params], "%.3f")))
+
     # profile q-network
-    flops, params = profile_model(agent.q_network.Q, encoder.feature_dim,
-                                  agent.device)
+    flops, params = profile_model(agent.approximator.q_network, q_feature_dim,
+                                  agent.approximator.device)
     total_flops += flops
     total_params += params
     print('QFunction: {} flops, {} params'.format(
         *clever_format([flops, params], "%.3f")))
-    # profile decode stage
-    flops, params = profile_model(decoder, encoder.feature_dim, agent.device)
-    total_flops += flops
-    total_params += params
-    print('Decoder: {} flops, {} params'.format(
-        *clever_format([flops, params], "%.3f")))
+    
     print('Total: {} flops, {} params'.format(
         *clever_format([total_flops, total_params], "%.3f")))
     return total_flops, total_params
@@ -137,7 +141,7 @@ class SRLFunction(QFunction):
             ae_model = self.models[i]
 
             q_app_path = str(path) + f"_ae_{m}.pth"
-            checkpoint = torch.load(q_app_path)
+            checkpoint = torch.load(q_app_path, map_location=self.device)
 
             ae_model.encoder.load_state_dict(checkpoint['encoder_state_dict'])
             if eval_only:
@@ -149,8 +153,8 @@ class SRLFunction(QFunction):
                 ae_model.encoder_optim.eval()
 
             if not encoder_only:
-                for i, (d, dopt) in enumerate(zip(ae_model.decoder,
-                                                  ae_model.decoder_opt)):
+                for i, (d, dopt) in enumerate(
+                        zip(ae_model.decoder, ae_model.decoder_opt)):
                     d.load_state_dict(checkpoint[f"decoder_state_dict_{i}"])
 
                 if eval_only:

@@ -107,14 +107,16 @@ class QFunction:
             'optimizer_state_dict': self.optimizer.state_dict(),
         }, path)
 
-    def load(self, path):
+    def load(self, path, eval_only=True):
         checkpoint = torch.load(path, map_location=self.device)
         self.q_network.load_state_dict(checkpoint['q_network_state_dict'])
         self.target_q_network.load_state_dict(checkpoint['target_q_network_state_dict'])
-        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        # Ensure the models are in evaluation mode after loading
-        self.q_network.eval()
-        self.target_q_network.eval()
+        if not eval_only:
+            # Ensure the models are in evaluation mode after loading
+            self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        else:
+            self.target_q_network.eval()
+            self.q_network.eval()
 
 
 class DDQNAgent:

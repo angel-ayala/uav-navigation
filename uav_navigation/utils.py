@@ -142,7 +142,7 @@ def run_agent(agent, env, training_steps, mem_steps, train_frequency,
             elapsed_time = time.time() - timemark
             tbar.clear()
             print(f"Episode {total_episodes:03d}\n- Learning: {elapsed_time:.3f} seconds\tR: {ep_reward:.4f}\tS: {ep_steps}")
-            agent.save(outpath / f"agent_ep_{total_episodes:03d}.pth")
+            agent.save(outpath / f"agent_ep_{total_episodes:03d}")
             if eval_steps > 0:
                 for fc in range(4):
                     e_reward, e_steps, e_time = evaluate_agent(

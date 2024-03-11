@@ -12,25 +12,24 @@ import numpy as np
 import torch
 from pathlib import Path
 
-from uav_navigation.srl.agent import AEDDQNAgent
-from uav_navigation.srl.net import VectorApproximator
-from uav_navigation.srl.net import PixelApproximator
-from uav_navigation.srl.agent import profile_agent as profile_agent_srl
-
-from uav_navigation.agent import DDQNAgent
-from uav_navigation.net import QNetwork
-from uav_navigation.net import QFeaturesNetwork
+from uav_navigation.agent import DDQNAgent, QFunction
+from uav_navigation.net import QNetwork, QFeaturesNetwork
 from uav_navigation.agent import profile_agent
-
+from uav_navigation.srl.agent import SRLDDQNAgent, SRLFunction
+from uav_navigation.srl.net import q_function
+from uav_navigation.srl.agent import profile_agent as profile_agent_srl
 from uav_navigation.utils import load_json_dict
 from uav_navigation.utils import evaluate_agent
-from uav_navigation.utils import ReducedVectorObservation
+
+from webots_drone.data import StoreStepData
+from webots_drone.envs.preprocessor import MultiModalObservation
+from webots_drone.envs.preprocessor import ReducedVectorObservation
+from webots_drone.envs.preprocessor import TargetVectorObservation
 from webots_drone.stack import ObservationStack
+
 from learn import list_of_float
 from learn import list_of_int
 
-from webots_drone.data import StoreStepData
-from webots_drone.envs.preprocessor import TargetVectorObservation
 
 def parse_args():
     parser = argparse.ArgumentParser()    # misc
@@ -73,8 +72,9 @@ def run_evaluation(seed_val, logpath, episode):
 
     # Define constants
     logpath = Path(logpath)
-    agents_path = list(logpath.glob('**/*.pth'))
-    agents_path.sort()
+    agents_paths = [lp.name[:12] for lp in logpath.glob('**/agent_ep_*_q*')]
+    agents_paths.sort()
+    print(agents_paths)
     episode = episode - 1
 
     # Environment args
@@ -98,47 +98,69 @@ def run_evaluation(seed_val, logpath, episode):
         env_params['fire_dim'] = args.target_dim
 
     # Create the environment
+    is_multimodal = False
+    if 'is_multimodal' in env_params.keys():
+        is_multimodal = env_params['is_multimodal']
+        del env_params['is_multimodal']
     env = gym.make(environment_name, **env_params)
+
+    rgb_shape = (3, 84, 84)
+    vector_shape = (22, )
+    if is_multimodal:
+        env = MultiModalObservation(env, shape1=rgb_shape, shape2=vector_shape,
+                                    frame_stack=frame_stack,
+                                    add_target=env_params['add_target'])
+        state_shape = (env.observation_space[0].shape,
+                       env.observation_space[1].shape)
+    else:
+        add_target = False
+        if add_target and not env_params['is_pixels']:
+            add_target = True
+            env = TargetVectorObservation(env)
+        env_params['add_target'] = add_target
+
+        if frame_stack > 1:
+            env = ObservationStack(env, k=frame_stack)
+
     if not env_params['is_pixels']:
         env = ReducedVectorObservation(env)
-    if add_target:
-        env = TargetVectorObservation(env)
+        if add_target:
+            env = TargetVectorObservation(env)
     if frame_stack > 1:
         env = ObservationStack(env, k=frame_stack)
 
     # Agent params
     agent_params = load_json_dict(logpath / 'args_agent.json')
-    if 'VectorApproximator' in agent_params['approximator']:
-        agent_params['approximator'] = VectorApproximator
-        agent_class = AEDDQNAgent
+    approximator_params = agent_params['approximator']
+    if agent_params['is_srl']:
+        agent_class = SRLDDQNAgent
+        q_approximator = SRLFunction
         agent_profiler = profile_agent_srl
-    elif 'PixelApproximator' in agent_params['approximator']:
-        agent_params['approximator'] = PixelApproximator
-        agent_class = AEDDQNAgent
-        agent_profiler = profile_agent_srl
-    elif 'QFeaturesNetwork' in agent_params['approximator']:
-        agent_params['approximator'] = QFeaturesNetwork
+        approximator_params['q_app_fn'] = q_function
+        del agent_params['is_srl']
+    else:
         agent_class = DDQNAgent
+        q_approximator = QFunction
         agent_profiler = profile_agent
-    elif 'QNetwork' in agent_params['approximator']:
-        agent_params['approximator'] = QNetwork
-        agent_class = DDQNAgent
-        agent_profiler = profile_agent
-    print('state_space_shape', agent_params['state_space_shape'])
-    print('action_space_shape', agent_params['action_space_shape'])
+        approximator_params['q_app_fn'] = QFeaturesNetwork\
+            if env_params['is_pixels'] else QNetwork
+    agent_params.update(
+        dict(approximator=q_approximator(**approximator_params)))
+
+    print('state_shape', agent_params['state_shape'])
+    print('action_shape', agent_params['action_shape'])
 
     agent = agent_class(**agent_params)
-    agent_profiler(agent,
-                   agent_params['state_space_shape'],
-                   agent_params['action_space_shape'])
-
+    agent_profiler(agent, agent_params['state_shape'],
+                   agent_params['action_shape'])
+    agent = agent_class(**agent_params)
     training_params = load_json_dict(logpath / 'args_training.json')
-    for log_ep, agent_path in enumerate(agents_path):
+    for log_ep, agent_path in enumerate(agents_paths):
         if episode > 0 and log_ep != episode:
             continue
         print('Loading from', "/".join(str(agent_path).split("/")[-3:]))
         agent = agent_class(**agent_params)
-        agent.load(agent_path)
+        agent.load(logpath / agent_path)
         store_callback = StoreStepData(
             logpath / f"history_eval_{log_ep+1:03d}.csv")
         for fc in target_pos:
