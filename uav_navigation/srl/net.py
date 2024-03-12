@@ -101,25 +101,27 @@ def slowness_cost(encoded_batch, lambda_=0.1):
     return slowness
 
 
-def variability_cost(encoded_batch):
+def variability_cost(h_t, h_t1):
     """
     Compute the variability loss for a batch of encoded representations.
 
     Parameters:
-    - encoded_batch: A 2D PyTorch tensor representing the batch of encoded representations.
+    - h_t: A 2D PyTorch tensor representing the batch of encoded representations in moment t.
+                     Each row represents one encoded representation.
+    - h_t1: A 2D PyTorch tensor representing the batch of encoded representations in moment t+1.
                      Each row represents one encoded representation.
 
     Returns:
     - variability: The variability loss.
     """
     # Pairwise Euclidean distances between all encoded representations in the batch
-    pairwise_distances = torch.cdist(encoded_batch, encoded_batch, p=2)
+    pairwise_distances = torch.cdist(h_t, h_t1, p=2)
 
     # Exponential of negative distances
     exponential_neg_distances = torch.exp(-pairwise_distances)
 
     # Exclude self-distances (diagonal elements)
-    mask = torch.eye(encoded_batch.size(0), dtype=torch.bool, device=encoded_batch.device)
+    mask = torch.eye(h_t.size(0), dtype=torch.bool, device=h_t.device)
     exponential_neg_distances = exponential_neg_distances.masked_fill(mask, 0)
 
     # Compute mean of exponential distances
@@ -128,23 +130,25 @@ def variability_cost(encoded_batch):
     return variability
 
 
-def proportionality_cost(encoded_states, actions):
+def proportionality_cost(h_t, h_t1, actions):
     """
     Compute the proportionality cost for encoded states.
 
     Parameters:
-    - encoded_states: A 2D PyTorch tensor representing the batch of encoded states.
-                      Each row represents one encoded state.
+    - h_t: A 2D PyTorch tensor representing the batch of encoded representations in moment t.
+                     Each row represents one encoded representation.
+    - h_t1: A 2D PyTorch tensor representing the batch of encoded representations in moment t+1.
+                     Each row represents one encoded representation.
     - actions: A 1D PyTorch tensor representing the actions corresponding to each encoded state.
 
     Returns:
     - proportionality: The proportionality cost.
     """
     # Compute differences in consecutive encoded states
-    delta_states = torch.diff(encoded_states, dim=0)
+    delta_states = h_t1 - h_t  # Calculate difference directly (avoiding incorrect torch.diff)
 
     # Filter pairs of consecutive time steps with equal actions
-    equal_actions_mask = torch.eq(actions[:-1], actions[1:])
+    equal_actions_mask = torch.eq(actions, torch.cat((actions[1:], actions[0].unsqueeze(0))))
 
     # Filter delta states based on equal actions mask
     delta_states_filtered = delta_states[equal_actions_mask]
@@ -159,35 +163,37 @@ def proportionality_cost(encoded_states, actions):
     proportionality = torch.mean(squared_norm_diffs)
 
     # Replace NaNs with a small constant (e.g., 1e-8)
-    proportionality = torch.where(torch.isnan(proportionality), 1e-8,
-                                  proportionality)
+    proportionality = torch.where(torch.isnan(proportionality), 1e-8, proportionality)
 
     return proportionality
 
 
-def repeatability_cost(encoded_states, actions):
+def repeatability_cost(h_t, h_t1, actions):
     """
-      Compute the repeatability cost for encoded states.
+    Compute the repeatability cost for encoded states.
 
-      Parameters:
-    - encoded_states: A 2D PyTorch tensor representing the batch of encoded states.
-              Each row represents one encoded state.
-    - actions: A 1D PyTorch tensor representing the actions corresponding to each encoded state.
+    Parameters:
+      - h_t: A 2D PyTorch tensor representing the batch of encoded representations in moment t.
+            Each row represents one encoded representation.
+      - h_t1: A 2D PyTorch tensor representing the batch of encoded representations in moment t+1.
+            Each row represents one encoded representation.
+      - actions: A 1D PyTorch tensor representing the actions corresponding to each encoded state.
 
-      Returns: - repeatability: The repeatability cost.
+    Returns:
+      - repeatability_loss: The repeatability loss.
     """
-    # Compute differences in consecutive encoded states (avoiding reduction at the end)
-    delta_states = torch.diff(encoded_states, dim=0)
+
+    # Calculate difference between consecutive encoded states
+    delta_states = h_t1 - h_t
 
     # Filter pairs of consecutive time steps with equal actions
-    equal_actions_mask = torch.eq(actions[:-1], actions[1:])
+    equal_actions_mask = torch.eq(actions, torch.cat((actions[1:], actions[0].unsqueeze(0))))
 
-    # Filter delta states based on equal actions mask (using full length)
+    # Filter delta states based on equal actions mask
     delta_states_filtered = delta_states[equal_actions_mask]
 
     # Calculate squared difference between encoded states (filtered)
-    squared_diff = torch.square(encoded_states[1:][equal_actions_mask] -
-                                encoded_states[:-1][equal_actions_mask])
+    squared_diff = torch.square(delta_states_filtered)
     # Sum the squared differences across dimensions (assuming each state is a vector)
     state_diff_norm = torch.sum(squared_diff, dim=0)
 
@@ -195,14 +201,13 @@ def repeatability_cost(encoded_states, actions):
     exp_term = torch.exp(-torch.clamp(state_diff_norm, min=0.0))
 
     # Compute squared differences of consecutive delta states (using valid indices)
-    squared_delta_state_diffs = torch.square(delta_states_filtered[1:] -
-                                             delta_states_filtered[:-1])
+    squared_delta_state_diffs = torch.square(delta_states_filtered[1:] - delta_states_filtered[:-1])
 
     # Combine terms and compute mean over filtered data
     repeatability_loss = torch.mean(exp_term * squared_delta_state_diffs)
+
     # Replace NaNs with a small constant (e.g., 1e-8)
-    repeatability_loss = torch.where(torch.isnan(repeatability_loss), 1e-8,
-                                     repeatability_loss)
+    repeatability_loss = torch.where(torch.isnan(repeatability_loss), 1e-8, repeatability_loss)
 
     return repeatability_loss
 
@@ -228,6 +233,30 @@ class MLP(nn.Module):
             h = h.detach()
 
         return h
+
+
+class BiGRU(nn.Module):
+    def __init__(self, input_size, output_size, hidden_size=4, num_layers=1):
+        super(BiGRU, self).__init__()
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
+        self.gru = nn.GRU(input_size, hidden_size, num_layers,
+                          batch_first=True, bidirectional=True)
+        self.fc = nn.Linear(hidden_size * 2, output_size)
+
+    def forward(self, x, device, detach=False):
+        # Combine data for each sample (assuming x is a list of [t, t+1] element pairs)
+        combined_data = [torch.cat(pair, dim=0) for pair in x]
+        combined_data = torch.stack(combined_data)  # Combine list into tensor
+        # Initialize hidden state
+        h0 = torch.zeros(self.num_layers * 2, combined_data.size(0),
+                         self.hidden_size).to(device)
+        # Forward propagate GRU
+        out, _ = self.gru(combined_data, h0)
+        # Decode the hidden state of the last time step
+        out = self.fc(out[:, -1, :])
+        return out
+
 
 class VectorEncoder(MLP):
     def __init__(self, state_shape, latent_dim, hidden_dim, num_layers=2):
@@ -276,6 +305,12 @@ class VectorDecoder(MLP):
             h = h.unsqueeze(2)
         out = last_layer(h)
         return out
+
+
+class OrientationBelief(VectorDecoder):
+    def __init__(self, latent_dim, hidden_dim=128):
+        super().__init__((1,), latent_dim=latent_dim, hidden_dim=hidden_dim,
+                         num_layers=1)
 
 
 class PixelEncoder(nn.Module):

@@ -6,8 +6,11 @@ Created on Fri Jan 26 15:28:24 2024
 @author: Angel Ayala
 """
 
-import torch.nn.functional as F
+import torch
+from torch.nn import functional as F
 from torch import optim
+from uav_navigation.logger import summary_scalar
+
 from .net import preprocess_obs
 from .net import rgb_reconstruction_model
 from .net import vector_reconstruction_model
@@ -16,7 +19,7 @@ from .net import slowness_cost
 from .net import variability_cost
 from .net import proportionality_cost
 from .net import repeatability_cost
-from uav_navigation.logger import summary_scalar
+from .net import BiGRU
 
 
 class AEModel:
@@ -80,12 +83,26 @@ class AEModel:
         self.encoder.to(device)
         for dec in self.decoder:
             dec.to(device)
+        
+    def create_bim(self, state_shape, hidden_size=10, learning_rate=1e-4):
+        self.bim = BiGRU(state_shape, state_shape, hidden_size)
+        self.bim_optim = optim.SGD(self.bim.parameters(), lr=learning_rate,
+                                   momentum=0.9)
+    
+    def update_bim(self, h_t, h_t1):
+        temp_series = torch.cat((h_t, h_t1), dim=1)
+        hat_obs_t = self.bim(temp_series)
+        bim_loss = F.mse_loss(hat_obs_t, h_t1)
+        summary_scalar(f'Loss/{self.type}/BiGRU', bim_loss.item())
+        return bim_loss
 
-    def __call__(self, observation):
+    def __call__(self, observation, detach=False):
         if self.type == 'imu2pose':
             z = self.encoder(observation[:, :6])
         else:
             z = self.encoder(observation)
+        if detach:
+            z = z.detach()
         return z
 
     def reconstruct_obs(self, image):
@@ -104,31 +121,34 @@ class AEModel:
         summary_scalar(f'Loss/{self.type}/Encoder/Slowness', slowness_loss.item())
         return slowness_loss
 
-    def encoder_variability(self, h):
+    def encoder_variability(self, h_t, h_t1):
         # Compute slowness cost
-        variability_loss = variability_cost(h)
+        variability_loss = variability_cost(h_t, h_t1)
         summary_scalar(f'Loss/{self.type}/Encoder/Variability', variability_loss.item())
         return variability_loss
 
-    def encoder_proportionality(self, h, actions):
+    def encoder_proportionality(self, h_t, h_t1, actions):
         # Compute slowness cost
-        proportionality_loss = proportionality_cost(h, actions)
+        proportionality_loss = proportionality_cost(h_t, h_t1, actions)
         summary_scalar(f'Loss/{self.type}/Encoder/Proportionality', proportionality_loss.item())
         return proportionality_loss
 
-    def encoder_repeatability(self, h, actions):
+    def encoder_repeatability(self, h_t, h_t1, actions):
         # Compute slowness cost
-        repeatability_loss = repeatability_cost(h, actions)
+        repeatability_loss = repeatability_cost(h_t, h_t1, actions)
         summary_scalar(f'Loss/{self.type}Encoder/Repeatibility', repeatability_loss.item())
         return repeatability_loss
 
-    def update_encoder(self, obs, actions):
+    def update_encoder(self, obs_t, obs_t1, actions):
         actions_argmax = actions.argmax(-1)
-        _, h = self.reconstruct_obs(obs)
-        enc_loss = self.encoder_slowness(h) 
-        enc_loss += self.encoder_variability(h)
-        enc_loss += self.encoder_proportionality(h, actions_argmax)
-        enc_loss += self.encoder_repeatability(h, actions_argmax)
+        h_t = self(obs_t)
+        h_t1 = self(obs_t1)
+
+        enc_loss = self.encoder_slowness(h_t) 
+        enc_loss -= self.encoder_variability(h_t, h_t1)
+        enc_loss += self.encoder_proportionality(h_t, h_t1, actions_argmax)
+        enc_loss += self.encoder_repeatability(h_t, h_t1, actions_argmax)
+        enc_loss *= 1e-3
         summary_scalar(f'Loss/{self.type}/Encoder/S+V+P+R', enc_loss.item())
 
         self.encoder_optim.zero_grad()

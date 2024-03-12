@@ -57,6 +57,7 @@ class SRLFunction(QFunction):
                          tau=tau, use_cuda=use_cuda)
         self.models = list()
         self.decoder_latent_lambda = decoder_latent_lambda
+        self.is_multimodal = False
 
     def update_multimodal(self):
         ae_types = [m.type for m in self.models]
@@ -126,7 +127,7 @@ class SRLFunction(QFunction):
         q_app_path = str(path) + "_q_function.pth"
         super().save(q_app_path)
 
-        for i, (m, _) in enumerate(ae_models):
+        for i, (m, _) in enumerate(ae_models.items()):
             ae_model = self.models[i]
             encoder, decoder = ae_model.encoder, ae_model.decoder
             encoder_opt, decoder_opt = ae_model.encoder_optim, ae_model.decoder_optim
@@ -208,26 +209,29 @@ class SRLDDQNAgent(DDQNAgent):
     def init_models(self):
         self.approximator.append_models(self.ae_models)
 
-    def update_representation(self, obs, actions):
+    def update_representation(self, obs, obs_t1, actions):
         if self.approximator.is_multimodal:
             obs_2d = obs[0]
             obs = obs[1]
+            obs_2d_t1 = obs_t1[0]
+            obs_t1 = obs_t1[1]
         else:
             obs_2d = obs
+            obs_2d_t1 = obs_t1
 
         for ae_model in self.approximator.models:
             if ae_model.type in ["rgb"]:
                 ae_model.optimize_reconstruction(
                     obs_2d, self.approximator.decoder_latent_lambda)
-                ae_model.update_encoder(obs_2d, actions)
+                ae_model.update_encoder(obs_2d, obs_2d_t1, actions)
             if ae_model.type in ["vector"]:
                 ae_model.optimize_reconstruction(
                     obs, self.approximator.decoder_latent_lambda)
-                ae_model.update_encoder(obs, actions)
+                ae_model.update_encoder(obs, obs_t1, actions)
             if ae_model.type in ["imu2pose"]:
                 ae_model.optimize_pose(
                     obs, self.approximator.decoder_latent_lambda)
-                ae_model.update_encoder(obs, actions)
+                ae_model.update_encoder(obs, obs_t1, actions)
 
     def update(self):
         # Update the Q-network if replay buffer is sufficiently large
@@ -237,8 +241,9 @@ class SRLDDQNAgent(DDQNAgent):
             self.update_approximator(sampled_data)
             # update the autoencoder
             obs_data = sampled_data[0][0] if self.is_prioritized else sampled_data[0]
+            obs_data_t1 = sampled_data[0][3] if self.is_prioritized else sampled_data[3]
             actions_data = sampled_data[0][1] if self.is_prioritized else sampled_data[1]
-            self.update_representation(obs_data, actions_data)
+            self.update_representation(obs_data, obs_data_t1, actions_data)
 
     def save(self, path, encoder_only=False):
         self.approximator.save(path, ae_models=self.ae_models)
