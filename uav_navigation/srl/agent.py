@@ -101,14 +101,19 @@ class SRLFunction(QFunction):
 
     def format_obs(self, obs):
         if self.is_multimodal:
-            obs_2d = np.array(obs[0])
-            obs_1d = np.array(obs[1])
+            obs_2d = obs[0]
+            obs_1d = obs[1]
         else:
-            obs_2d = np.array(obs)
-            obs_1d = np.array(obs)
+            obs_2d = obs
+            obs_1d = obs
+        
+        if type(obs_2d) != torch.TensorType:
+            obs_2d = np.array(obs_2d)
+            obs_2d = torch.tensor(obs_2d, dtype=torch.float32)
+        if type(obs_1d) != torch.TensorType:
+            obs_1d = np.array(obs_1d)
+            obs_1d = torch.tensor(obs_1d, dtype=torch.float32)
 
-        obs_2d = torch.tensor(obs_2d, dtype=torch.float32)
-        obs_1d = torch.tensor(obs_1d, dtype=torch.float32)
         if len(obs_2d.shape) == 3:
             obs_2d = obs_2d.unsqueeze(0)
         if len(obs_1d.shape) == 1:
@@ -266,7 +271,7 @@ class SRLDDQNAgent(DDQNAgent):
             obs_data_t1 = sampled_data[0][3] if self.is_prioritized else sampled_data[3]
             actions_data = sampled_data[0][1] if self.is_prioritized else sampled_data[1]
             self.update_representation(obs_data, obs_data_t1, actions_data)
-            # self.update_encoder(obs_data, obs_data_t1, actions_data)
+            self.update_encoder(obs_data, obs_data_t1, actions_data)
             self.update_priors(obs_data, obs_data_t1, actions_data)
 
     def save(self, path, encoder_only=False):
