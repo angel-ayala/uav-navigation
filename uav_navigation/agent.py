@@ -94,11 +94,9 @@ class QFunction:
 
         return td_targets
 
-    def optimize(self, td_loss):
-        # loss = torch.mean(losses)
-        summary_scalar('Loss/Q-value', td_loss.item())
+    def update(self, td_loss, retain_graph=False):
         self.optimizer.zero_grad()
-        td_loss.backward()
+        td_loss.backward(retain_graph=retain_graph)
         self.optimizer.step()
 
     def save(self, path):
@@ -132,6 +130,8 @@ class DDQNAgent:
                  epsilon_end=0.01,
                  epsilon_steps=500000,
                  memory_buffer=None):
+        self.state_shape = state_shape
+        self.action_shape = action_shape
         self.discount_factor = discount_factor
         self.epsilon_start = epsilon_start
         self.epsilon_end = epsilon_end
@@ -172,9 +172,10 @@ class DDQNAgent:
         if len(self.memory) >= self.BATCH_SIZE:
             sampled_data = self.memory.sample(
                 self.BATCH_SIZE, device=self.approximator.device)
-            self.update_approximator(sampled_data)
+            td_loss = self.compute_td_loss(sampled_data)
+            self.approximator.update(td_loss)
 
-    def update_approximator(self, sampled_data):
+    def compute_td_loss(self, sampled_data):
         if self.is_prioritized:
             (states, actions, rewards, next_states, dones
              ), priorities = sampled_data
@@ -198,7 +199,8 @@ class DDQNAgent:
             loss = torch.mean(losses * priorities['weights'])
         else:
             loss = torch.mean(losses)
-        self.approximator.optimize(loss)
+        summary_scalar('Loss/TDLoss', loss.item())
+        return loss
 
     def save(self, path):
         self.approximator.save(str(path) + ".pth")

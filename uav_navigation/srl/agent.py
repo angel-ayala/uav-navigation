@@ -16,7 +16,10 @@ from uav_navigation.agent import profile_q_approximator
 from uav_navigation.utils import profile_model
 from uav_navigation.utils import obs2tensor
 from .net import weight_init
+# from .net import OrientationBelief
+from .net import OdometryBelief
 from .autoencoder import AEModel
+from .autoencoder import PriorModel
 
 
 def profile_srl_approximator(approximator, state_shape, action_shape):
@@ -51,18 +54,13 @@ def profile_srl_approximator(approximator, state_shape, action_shape):
 
 class SRLFunction(QFunction):
     def __init__(self, q_app_fn, q_app_params, learning_rate=1e-3,
-                 momentum=0.9, tau=0.1, use_cuda=True,
+                 momentum=0.9, tau=0.1, use_cuda=True, is_multimodal=True,
                  decoder_latent_lambda=1e-6):
         super().__init__(q_app_fn, q_app_params, learning_rate, momentum,
                          tau=tau, use_cuda=use_cuda)
         self.models = list()
         self.decoder_latent_lambda = decoder_latent_lambda
-        self.is_multimodal = False
-
-    def update_multimodal(self):
-        ae_types = [m.type for m in self.models]
-        self.is_multimodal = "rgb" in ae_types and (
-            "vector" in ae_types or "imu2pose" in ae_types)
+        self.is_multimodal = is_multimodal
 
     def append_autoencoder(self, ae_model,
                            encoder_lr,
@@ -72,7 +70,6 @@ class SRLFunction(QFunction):
         ae_model.apply(weight_init)
         ae_model.sgd_optimizer(encoder_lr, decoder_lr, decoder_weight_decay)
         self.models.append(ae_model)
-        self.update_multimodal()
 
     def append_models(self, models):
         # ensure empty list
@@ -86,42 +83,51 @@ class SRLFunction(QFunction):
                 ae_model, m_params['encoder_lr'], m_params['decoder_lr'],
                 m_params['decoder_weight_decay'])
 
-    def compute_z(self, observations):
+    def compute_z(self, observations, latent_types=None):
         z_hat = list()
-        obs_2d = observations
-
-        if self.is_multimodal:
-            obs_2d = observations[0]
-            observations = observations[1]
+        obs_2d, obs_1d = self.format_obs(observations)
 
         if len(obs_2d.shape) == 3:
             obs_2d = torch.tensor(obs_2d, dtype=torch.float32).unsqueeze(0)
 
-        if len(observations.shape) == 1:
-            observations = torch.tensor(observations,
-                                        dtype=torch.float32).unsqueeze(0)
+        if len(obs_1d.shape) == 1:
+            obs_1d = torch.tensor(obs_1d, dtype=torch.float32).unsqueeze(0)
 
         for m in self.models:
-            if m.type in ['rgb']:
-                z = m(obs_2d.to(self.device))
-            if m.type in ['vector', 'imu2pose']:
-                z = m(observations.to(self.device))
-            z_hat.append(z)
+            if latent_types is None or m.type in latent_types:
+                if m.type in ['rgb']:
+                    z = m(obs_2d.to(self.device))
+                if m.type in ['vector', 'imu2pose']:
+                    z = m(obs_1d.to(self.device))
+                z_hat.append(z)
 
         z_hat = torch.cat(z_hat, dim=1)
         return z_hat
 
+    def format_obs(self, obs):
+        obs_2d = obs
+        obs_1d = obs
+        if self.is_multimodal:
+            obs_2d = obs[0]
+            obs_1d = obs[1]
+        return obs_2d, obs_1d
+
     def compute_q(self, observations, actions=None):
         # Compute Q-values using the inferenced z latent representation
-        obs_tensor = obs2tensor(observations)
-        z_hat = self.compute_z(obs_tensor)
+        z_hat = self.compute_z(observations)
         return super().compute_q(z_hat, actions)
 
     def compute_q_target(self, observations, actions=None):
         # Compute Q-values using the target Q-network
-        obs_tensor = obs2tensor(observations)
-        z_hat = self.compute_z(obs_tensor)
+        z_hat = self.compute_z(observations)
         return super().compute_q_target(z_hat, actions)
+
+    def update(self, td_loss):
+        for m in self.models:
+            m.encoder_optim.zero_grad()
+        super().update(td_loss)
+        for m in self.models:
+            m.encoder_optim.step()
 
     def save(self, path, ae_models, encoder_only=False):
         q_app_path = str(path) + "_q_function.pth"
@@ -205,45 +211,60 @@ class SRLDDQNAgent(DDQNAgent):
             memory_buffer=memory_buffer)
 
         self.ae_models = ae_models
+        self.prior_models = list()
+
+    def init_priors(self):
+        # bmodel = OrientationBelief(50)
+        bmodel = OdometryBelief(50)
+        self.prior_models.append(PriorModel(bmodel))
+        self.prior_models[-1].sgd_optimizer()
 
     def init_models(self):
         self.approximator.append_models(self.ae_models)
 
     def update_representation(self, obs, obs_t1, actions):
-        if self.approximator.is_multimodal:
-            obs_2d = obs[0]
-            obs = obs[1]
-            obs_2d_t1 = obs_t1[0]
-            obs_t1 = obs_t1[1]
-        else:
-            obs_2d = obs
-            obs_2d_t1 = obs_t1
+        obs_2d, obs_1d = self.approximator.format_obs(obs)
+        obs_2d_t1, obs_1d_t1 = self.approximator.format_obs(obs_t1)
 
         for ae_model in self.approximator.models:
             if ae_model.type in ["rgb"]:
                 ae_model.optimize_reconstruction(
                     obs_2d, self.approximator.decoder_latent_lambda)
-                ae_model.update_encoder(obs_2d, obs_2d_t1, actions)
             if ae_model.type in ["vector"]:
                 ae_model.optimize_reconstruction(
-                    obs, self.approximator.decoder_latent_lambda)
-                ae_model.update_encoder(obs, obs_t1, actions)
+                    obs_1d, self.approximator.decoder_latent_lambda)
             if ae_model.type in ["imu2pose"]:
                 ae_model.optimize_pose(
-                    obs, self.approximator.decoder_latent_lambda)
-                ae_model.update_encoder(obs, obs_t1, actions)
+                    obs_1d, self.approximator.decoder_latent_lambda)
+
+    def update_encoder(self, obs, obs_t1, actions):
+        obs_2d, obs_1d = self.approximator.format_obs(obs)
+        obs_2d_t1, obs_1d_t1 = self.approximator.format_obs(obs_t1)
+        for ae_model in self.approximator.models:
+            if ae_model.type in ["rgb"]:
+                ae_model.update_encoder(obs_2d, obs_2d_t1, actions)
+            if ae_model.type in ["vector", "imu2pose"]:
+                ae_model.update_encoder(obs_1d, obs_1d_t1, actions)
+
+
+    def update_priors(self, obs, obs_t1, actions):
+        for pmodel in self.prior_models:
+            pmodel.update(obs, obs_t1, actions, self.approximator)
 
     def update(self):
         # Update the Q-network if replay buffer is sufficiently large
         if len(self.memory) >= self.BATCH_SIZE:
             sampled_data = self.memory.sample(
                 self.BATCH_SIZE, device=self.approximator.device)
-            self.update_approximator(sampled_data)
+            td_loss = self.compute_td_loss(sampled_data)
+            self.approximator.update(td_loss)
             # update the autoencoder
             obs_data = sampled_data[0][0] if self.is_prioritized else sampled_data[0]
             obs_data_t1 = sampled_data[0][3] if self.is_prioritized else sampled_data[3]
             actions_data = sampled_data[0][1] if self.is_prioritized else sampled_data[1]
             self.update_representation(obs_data, obs_data_t1, actions_data)
+            self.update_encoder(obs_data, obs_data_t1, actions_data)
+            self.update_priors(obs_data, obs_data_t1, actions_data)
 
     def save(self, path, encoder_only=False):
         self.approximator.save(path, ae_models=self.ae_models)

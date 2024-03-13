@@ -64,19 +64,13 @@ class ReplayBuffer:
             return observations, actions, rewards, next_obs, dones
         else:
             if self.is_multimodal:
-                obs_tensor = (torch.tensor(
-                    observations[0], dtype=torch.float32).to(device),
-                    torch.tensor(
-                        observations[1], dtype=torch.float32).to(device))
-                next_obs_tensor = (torch.tensor(
-                    next_obs[0], dtype=torch.float32).to(device),
-                    torch.tensor(
-                        next_obs[1], dtype=torch.float32).to(device))
+                obs_tensor = (torch.tensor(observations[0], dtype=torch.float32).to(device),
+                              torch.tensor(observations[1], dtype=torch.float32).to(device))
+                next_obs_tensor = (torch.tensor(next_obs[0], dtype=torch.float32).to(device),
+                                   torch.tensor(next_obs[1], dtype=torch.float32).to(device))
             else:
-                obs_tensor = torch.tensor(observations,
-                                          dtype=torch.float32).to(device)
-                next_obs_tensor = torch.tensor(next_obs,
-                                          dtype=torch.float32).to(device)
+                obs_tensor = torch.tensor(observations, dtype=torch.float32).to(device)
+                next_obs_tensor = torch.tensor(next_obs, dtype=torch.float32).to(device)
             return (
                 obs_tensor,
                 torch.tensor(actions, dtype=torch.float32).to(device),

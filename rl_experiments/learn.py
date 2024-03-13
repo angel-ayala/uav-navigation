@@ -68,8 +68,6 @@ def parse_args():
                          help='Whether if reconstruct an image-based observation.')
     arg_env.add_argument("--is-vector", action='store_true',
                          help='Whether if reconstruct a vector-based observation.')
-    arg_env.add_argument("--is-pose", action='store_true',
-                         help='Whether if reconstruct the pose observation.')
     arg_env.add_argument("--add-target", action='store_true',
                          help='Whether if add the target info to vector state.')
 
@@ -124,6 +122,10 @@ def parse_args():
                          help='Decoder regularization \lambda value.')
     arg_srl.add_argument("--decoder-weight-decay", type=float, default=1e-7,
                          help='Decoder function Adam weight decay value.')
+    arg_srl.add_argument("--model-rgb", action='store_true',
+                         help='Whether if use the RGB reconstruction model.')
+    arg_srl.add_argument("--model-pose", action='store_true',
+                         help='Whether if use the Pose reconstruction model.')
 
     arg_training = parser.add_argument_group('Training')
     arg_training.add_argument("--steps", type=int, default=450000,  # 25h at 25 frames
@@ -160,9 +162,7 @@ if __name__ == '__main__':
 
     # Environment args
     environment_name = 'webots_drone:webots_drone/DroneEnvDiscrete-v0'
-    is_multimodal = args.is_pixels and (args.is_vector or args.is_pose)
-    if is_multimodal:
-        assert args.is_pixels == is_multimodal, "multimodal requires --is-pixels and --is-vector or --is-pose flags"
+    is_multimodal = args.is_pixels and args.is_vector
 
     env_params = dict(
         time_limit_seconds=args.time_limit,  # 1 min
@@ -203,7 +203,6 @@ if __name__ == '__main__':
             env_params['frame_stack'] = args.frame_stack
 
     # Agent args
-    state_shape = env.observation_space.shape
     agent_params = dict(
         state_shape=state_shape,
         action_shape=(env.action_space.n, ),
@@ -219,7 +218,8 @@ if __name__ == '__main__':
         learning_rate=args.approximator_lr,
         momentum=args.approximator_momentum,
         tau=args.approximator_tau,
-        use_cuda=args.use_cuda)
+        use_cuda=args.use_cuda,
+        is_multimodal=is_multimodal)
 
     if args.is_srl:
         agent_class = SRLDDQNAgent
@@ -231,7 +231,7 @@ if __name__ == '__main__':
             hidden_dim=args.hidden_dim,
             num_layers=args.num_layers)
 
-        if args.is_pixels:
+        if args.model_rgb:
             image_shape = agent_params['state_shape'][0] if is_multimodal else agent_params['state_shape']
             ae_models['rgb'] = dict(image_shape=image_shape,
                                     latent_dim=args.latent_dim,
@@ -240,16 +240,16 @@ if __name__ == '__main__':
                                     encoder_lr=args.encoder_lr,
                                     decoder_lr=args.decoder_lr,
                                     decoder_weight_decay=args.decoder_weight_decay)
-        if args.is_vector:
+        if args.model_vector:
             vector_shape = agent_params['state_shape'][1] if is_multimodal else agent_params['state_shape']
             ae_models['vector'] = dict(vector_shape=vector_shape,
-                                       hidden_dim=args.hidden_dim,
-                                       latent_dim=args.latent_dim,
-                                       num_layers=args.num_layers,
-                                       encoder_lr=args.encoder_lr,
-                                       decoder_lr=args.decoder_lr,
-                                       decoder_weight_decay=args.decoder_weight_decay)
-        if args.is_pose:
+                                        hidden_dim=args.hidden_dim,
+                                        latent_dim=args.latent_dim,
+                                        num_layers=args.num_layers,
+                                        encoder_lr=args.encoder_lr,
+                                        decoder_lr=args.decoder_lr,
+                                        decoder_weight_decay=args.decoder_weight_decay)
+        if args.model_pose:
             ae_models['imu2pose'] = dict(imu_shape=(6, ),
                                          pos_shape=(6, ),
                                          hidden_dim=args.hidden_dim,
@@ -295,6 +295,7 @@ if __name__ == '__main__':
     agent_params.update(dict(memory_buffer=memory_buffer))
     agent = agent_class(**agent_params)
     agent.init_models()
+    agent.init_priors()
     # update params to save info
     memory_params.update(dict(is_prioritized=args.memory_prioritized))
     agent_params.update(dict(memory_buffer=memory_params))

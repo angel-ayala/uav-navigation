@@ -260,7 +260,7 @@ class BiGRU(nn.Module):
 
 class VectorEncoder(MLP):
     def __init__(self, state_shape, latent_dim, hidden_dim, num_layers=2):
-        super().__init__(state_shape, latent_dim, hidden_dim,
+        super().__init__(state_shape[-1], latent_dim, hidden_dim,
                          num_layers=num_layers-1)
         if len(state_shape) == 2:
             first_layer = nn.Conv1d(state_shape[0], hidden_dim,
@@ -311,6 +311,33 @@ class OrientationBelief(VectorDecoder):
     def __init__(self, latent_dim, hidden_dim=128):
         super().__init__((1,), latent_dim=latent_dim, hidden_dim=hidden_dim,
                          num_layers=1)
+        self.latent_types = ['rgb']
+        self.target_types = ['vector']
+
+    def obs2target(self, obs):
+        return obs[:, 12]
+
+
+class OdometryBelief(VectorDecoder):
+    def __init__(self, latent_dim, hidden_dim=128):
+        # UAV vector + action
+        super().__init__((13,), latent_dim=latent_dim, hidden_dim=hidden_dim,
+                         num_layers=2)
+        self.latent_types = ['rgb']
+        self.target_types = ['vector']
+    
+    def forward(self, obs, detach=False):
+        out = super().forward(obs, detach)
+        out = torch.tanh(out)
+        return out
+
+    def obs2target(self, obs):
+        # inertial_diff = obs[:, :6] - obs_t1[:, :6]
+        # translational_diff = obs[:, 6:12] - obs_t1[:, 6:12]
+        # orientation_diff = obs[:, 12:13] - obs_t1[:, 12:13]
+        # return torch.cat((inertial_diff, translational_diff, orientation_diff), dim=1)
+        return obs[:, :13]
+        
 
 
 class PixelEncoder(nn.Module):
