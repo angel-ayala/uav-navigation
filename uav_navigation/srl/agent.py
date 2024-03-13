@@ -113,7 +113,7 @@ class SRLFunction(QFunction):
             obs_2d = obs_2d.unsqueeze(0)
         if len(obs_1d.shape) == 1:
             obs_1d = obs_1d.unsqueeze(0)
-        return obs_2d, obs_1d
+        return obs_2d.to(self.device), obs_1d.to(self.device)
 
     def compute_q(self, observations, actions=None):
         # Compute Q-values using the inferenced z latent representation
@@ -218,7 +218,7 @@ class SRLDDQNAgent(DDQNAgent):
 
     def init_priors(self):
         # bmodel = OrientationBelief(50)
-        bmodel = OdometryBelief(50)
+        bmodel = OdometryBelief(self.state_shape[1], 50)
         self.prior_models.append(PriorModel(bmodel))
         self.prior_models[-1].sgd_optimizer()
 
@@ -267,7 +267,7 @@ class SRLDDQNAgent(DDQNAgent):
             actions_data = sampled_data[0][1] if self.is_prioritized else sampled_data[1]
             self.update_representation(obs_data, obs_data_t1, actions_data)
             # self.update_encoder(obs_data, obs_data_t1, actions_data)
-            # self.update_priors(obs_data, obs_data_t1, actions_data)
+            self.update_priors(obs_data, obs_data_t1, actions_data)
 
     def save(self, path, encoder_only=False):
         self.approximator.save(path, ae_models=self.ae_models)

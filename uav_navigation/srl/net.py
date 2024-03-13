@@ -319,24 +319,26 @@ class OrientationBelief(VectorDecoder):
 
 
 class OdometryBelief(VectorDecoder):
-    def __init__(self, latent_dim, hidden_dim=128):
+    def __init__(self, state_shape, latent_dim, hidden_dim=128):
         # UAV vector + action
-        super().__init__((13,), latent_dim=latent_dim, hidden_dim=hidden_dim,
-                         num_layers=2)
+        input_shape = list(state_shape)
+        input_shape[-1] = 13
+        super().__init__(input_shape, latent_dim=latent_dim,
+                         hidden_dim=hidden_dim, num_layers=2)
         self.latent_types = ['rgb']
         self.target_types = ['vector']
     
-    def forward(self, obs, detach=False):
-        out = super().forward(obs, detach)
-        out = torch.tanh(out)
-        return out
+    # def forward(self, obs, detach=False):
+    #     out = super().forward(obs, detach)
+    #     # out = torch.tanh(out)
+    #     return out
 
     def obs2target(self, obs):
         # inertial_diff = obs[:, :6] - obs_t1[:, :6]
         # translational_diff = obs[:, 6:12] - obs_t1[:, 6:12]
         # orientation_diff = obs[:, 12:13] - obs_t1[:, 12:13]
         # return torch.cat((inertial_diff, translational_diff, orientation_diff), dim=1)
-        return obs[:, :13]
+        return obs[..., :13]
         
 
 
