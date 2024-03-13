@@ -9,6 +9,7 @@ Based on:
 https://arxiv.org/abs/1910.01741
 """
 import torch
+import numpy as np
 from thop import clever_format
 from uav_navigation.agent import QFunction
 from uav_navigation.agent import DDQNAgent
@@ -87,12 +88,6 @@ class SRLFunction(QFunction):
         z_hat = list()
         obs_2d, obs_1d = self.format_obs(observations)
 
-        if len(obs_2d.shape) == 3:
-            obs_2d = torch.tensor(obs_2d, dtype=torch.float32).unsqueeze(0)
-
-        if len(obs_1d.shape) == 1:
-            obs_1d = torch.tensor(obs_1d, dtype=torch.float32).unsqueeze(0)
-
         for m in self.models:
             if latent_types is None or m.type in latent_types:
                 if m.type in ['rgb']:
@@ -105,11 +100,19 @@ class SRLFunction(QFunction):
         return z_hat
 
     def format_obs(self, obs):
-        obs_2d = obs
-        obs_1d = obs
         if self.is_multimodal:
-            obs_2d = obs[0]
-            obs_1d = obs[1]
+            obs_2d = np.array(obs[0])
+            obs_1d = np.array(obs[1])
+        else:
+            obs_2d = np.array(obs)
+            obs_1d = np.array(obs)
+
+        obs_2d = torch.tensor(obs_2d, dtype=torch.float32)
+        obs_1d = torch.tensor(obs_1d, dtype=torch.float32)
+        if len(obs_2d.shape) == 3:
+            obs_2d = obs_2d.unsqueeze(0)
+        if len(obs_1d.shape) == 1:
+            obs_1d = obs_1d.unsqueeze(0)
         return obs_2d, obs_1d
 
     def compute_q(self, observations, actions=None):
@@ -263,8 +266,8 @@ class SRLDDQNAgent(DDQNAgent):
             obs_data_t1 = sampled_data[0][3] if self.is_prioritized else sampled_data[3]
             actions_data = sampled_data[0][1] if self.is_prioritized else sampled_data[1]
             self.update_representation(obs_data, obs_data_t1, actions_data)
-            self.update_encoder(obs_data, obs_data_t1, actions_data)
-            self.update_priors(obs_data, obs_data_t1, actions_data)
+            # self.update_encoder(obs_data, obs_data_t1, actions_data)
+            # self.update_priors(obs_data, obs_data_t1, actions_data)
 
     def save(self, path, encoder_only=False):
         self.approximator.save(path, ae_models=self.ae_models)

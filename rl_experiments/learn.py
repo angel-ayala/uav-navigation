@@ -126,6 +126,8 @@ def parse_args():
                          help='Whether if use the RGB reconstruction model.')
     arg_srl.add_argument("--model-pose", action='store_true',
                          help='Whether if use the Pose reconstruction model.')
+    arg_srl.add_argument("--model-vector", action='store_true',
+                         help='Whether if use the Vector reconstruction model.')
 
     arg_training = parser.add_argument_group('Training')
     arg_training.add_argument("--steps", type=int, default=450000,  # 25h at 25 frames
