@@ -106,11 +106,11 @@ class SRLFunction(QFunction):
         else:
             obs_2d = obs
             obs_1d = obs
-        
-        if type(obs_2d) != torch.TensorType:
+
+        if not torch.is_tensor(obs_2d):
             obs_2d = np.array(obs_2d)
             obs_2d = torch.tensor(obs_2d, dtype=torch.float32)
-        if type(obs_1d) != torch.TensorType:
+        if not torch.is_tensor(obs_1d):
             obs_1d = np.array(obs_1d)
             obs_1d = torch.tensor(obs_1d, dtype=torch.float32)
 
