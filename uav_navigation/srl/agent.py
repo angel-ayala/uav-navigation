@@ -307,7 +307,7 @@ class SRLDDQNAgent(DDQNAgent):
             prior_loss = self.approximator.compute_priors_loss(obs, obs_t1, actions)
             tloss += prior_loss.sum() * 0.1
         if self.srl_loss:
-            tloss += torch.mean(torch.stack(srl_loss))
+            tloss += torch.mean(torch.stack(srl_loss)) * 0.1  # \times lambda
 
         summary_scalar("Loss/Representation/TotalLoss", tloss.item())
         self.approximator.update_representation(tloss)
