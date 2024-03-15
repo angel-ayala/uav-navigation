@@ -9,6 +9,8 @@ Created on Fri Jan 26 15:28:24 2024
 import torch
 from torch.nn import functional as F
 from torch import optim
+from thop import clever_format
+from uav_navigation.utils import profile_model
 from uav_navigation.logger import summary_scalar
 
 from .net import preprocess_obs
@@ -20,6 +22,22 @@ from .net import variability_cost
 from .net import proportionality_cost
 from .net import repeatability_cost
 from .net import BiGRU
+
+
+
+def profile_ae_model(ae_model, state_shape, device):
+    total_flops, total_params = 0, 0
+    flops, params = profile_model(ae_model.encoder, state_shape, device)
+    print('Encoder {}: {} flops, {} params'.format(
+        ae_model.type, *clever_format([flops, params], "%.3f")))
+    # profile decode stage
+    for i, decoder in enumerate(ae_model.decoder):
+        flops, params = profile_model(decoder, ae_model.encoder.feature_dim, device)
+        total_flops += flops
+        total_params += params
+        print('Decoder {} ({}): {} flops, {} params'.format(
+            ae_model.type, i, *clever_format([flops, params], "%.3f")))
+    return total_flops, total_params
 
 
 class AEModel:
@@ -162,15 +180,14 @@ class AEModel:
         # preprocess images to be in [-0.5, 0.5] range
         target_obs = preprocess_obs(obs)
         rec_loss = F.mse_loss(target_obs, rec_obs)
-        summary_scalar(f'Loss/{self.type}/ReconstructionLoss', rec_loss.item())
 
         # add L2 penalty on latent representation
         # see https://arxiv.org/pdf/1903.12436.pdf
         latent_loss = (0.5 * h.pow(2).sum(1)).mean()
-        summary_scalar(f'Loss/{self.type}/EncoderActivation', latent_loss.item())
+        summary_scalar(f'Loss/{self.type}/EncoderActivationL2', latent_loss.item())
 
         rloss = rec_loss + decoder_latent_lambda * latent_loss
-        summary_scalar(f'Loss/{self.type}/TotalLoss', rloss.item())
+        summary_scalar(f'Loss/{self.type}/ReconstructionLoss', rloss.item())
         return rloss
 
     def reconstruct_pose(self, obs_vector):

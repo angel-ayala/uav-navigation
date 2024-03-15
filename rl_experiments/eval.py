@@ -108,7 +108,7 @@ def run_evaluation(seed_val, logpath, episode):
     if is_multimodal:
         env = MultiModalObservation(env, shape1=rgb_shape, shape2=vector_shape,
                                     frame_stack=frame_stack,
-                                    add_target=env_params['add_target'])
+                                    add_target=add_target)
         state_shape = (env.observation_space[0].shape,
                        env.observation_space[1].shape)
     else:
@@ -116,7 +116,7 @@ def run_evaluation(seed_val, logpath, episode):
         if add_target and not env_params['is_pixels']:
             add_target = True
             env = TargetVectorObservation(env)
-        env_params['add_target'] = add_target
+        # env_params['add_target'] = add_target
 
         if frame_stack > 1:
             env = ObservationStack(env, k=frame_stack)
@@ -156,8 +156,8 @@ def run_evaluation(seed_val, logpath, episode):
                       agent_params['action_shape'])
 
     # Instantiate an init evaluation
-    agent = agent_class(**agent_params)
     agent_params['approximator'] = q_approximator(**approximator_params)
+    agent = agent_class(**agent_params)
     training_params = load_json_dict(logpath / 'args_training.json')
     for log_ep, agent_path in enumerate(agent_paths):
         if episode > 0 and log_ep != episode:

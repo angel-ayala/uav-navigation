@@ -22,26 +22,23 @@ from .net import NorthBelief
 from .net import PositionBelief
 from .net import OrientationBelief
 from .autoencoder import AEModel
+from .autoencoder import profile_ae_model
 
 
 def profile_srl_approximator(approximator, state_shape, action_shape):
     total_flops, total_params = 0, 0
     q_feature_dim = 0
     for m in approximator.models:
-        # profile encode stage
-        flops, params = profile_model(m.encoder, state_shape, approximator.device)
+        if approximator.is_multimodal:
+            if m.type == 'rgb':
+                flops, params = profile_ae_model(m, state_shape[0], approximator.device)
+            if m.type == 'vector':
+                flops, params = profile_ae_model(m, state_shape[1], approximator.device)
+        else:
+            flops, params = profile_ae_model(m, state_shape, approximator.device)
         total_flops += flops
         total_params += params
-        print('Encoder {}: {} flops, {} params'.format(
-            m.type, *clever_format([flops, params], "%.3f")))
         q_feature_dim += m.encoder.feature_dim
-        # profile decode stage
-        for i, decoder in enumerate(m.decoder):
-            flops, params = profile_model(decoder, m.encoder.feature_dim, approximator.device)
-            total_flops += flops
-            total_params += params
-            print('Decoder {} {}: {} flops, {} params'.format(
-                i, m.type, *clever_format([flops, params], "%.3f")))
 
     # profile q-network
     flops, params = profile_q_approximator(approximator, q_feature_dim,
