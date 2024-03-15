@@ -9,7 +9,10 @@ Based on:
 https://arxiv.org/abs/1910.01741
 """
 import torch
+import numpy as np
 from torch import nn
+from torch import optim
+from torch.nn import functional as F
 
 
 OUT_DIM = {2: 39, 4: 35, 6: 31}
@@ -35,6 +38,11 @@ def tie_weights(src, trg):
     assert type(src) == type(trg)
     trg.weight = src.weight
     trg.bias = src.bias
+
+
+def sgd_optimizer(model, learning_rate=1e-5, momentum=0.9, **kwargs):
+    return optim.SGD(model.parameters(), lr=learning_rate, momentum=momentum,
+                     nesterov=True, **kwargs)
 
 
 def preprocess_obs(obs, bits=5):
@@ -212,22 +220,45 @@ def repeatability_cost(h_t, h_t1, actions):
     return repeatability_loss
 
 
+def angular_loss(orientation, orientation_true):
+    """
+    Calculates the angular difference loss between predicted and target angles.
+
+    Args:
+      orientation: Predicted angles (in radians), PyTorch tensor.
+      orientation_true: Ground truth angles (in radians), PyTorch tensor.
+
+    Returns:
+      Loss value, a scalar tensor.
+    """
+    orientation = (orientation + np.pi) % (2 * np.pi) - np.pi
+    orientation_true = (orientation_true + np.pi) % (2 * np.pi) - np.pi
+    # Calculate difference between angles
+    diff = orientation - orientation_true
+    # Approximate loss using squared difference
+    loss = 1 - ((torch.cos(diff) + 1.) / 2)
+    return loss
+
 
 class MLP(nn.Module):
     """MLP for q-function."""
 
-    def __init__(self, n_input, n_output, hidden_dim, num_layers=2):
+    def __init__(self, n_input, n_output, hidden_dim, num_layers=3):
         super().__init__()
         self.num_layers = num_layers
         self.h_layers = nn.ModuleList([nn.Linear(n_input, hidden_dim)])
         for i in range(num_layers - 1):
             self.h_layers.append(nn.Linear(hidden_dim, hidden_dim))
+        self.h_layers.insert(len(self.h_layers) - 1, nn.Dropout(0.2))
         self.h_layers.append(nn.Linear(hidden_dim, n_output))
 
     def forward(self, obs, detach=False):
         h = obs
         for i in range(self.num_layers):
-            h = torch.relu(self.h_layers[i](h))
+            if isinstance(self.h_layers[i], nn.Dropout):
+                h = self.h_layers[i](h)
+            else:
+                h = torch.relu(self.h_layers[i](h))
 
         if detach:
             h = h.detach()
@@ -259,7 +290,7 @@ class BiGRU(nn.Module):
 
 
 class VectorEncoder(MLP):
-    def __init__(self, state_shape, latent_dim, hidden_dim, num_layers=2):
+    def __init__(self, state_shape, latent_dim, hidden_dim, num_layers=3):
         super().__init__(state_shape[-1], latent_dim, hidden_dim,
                          num_layers=num_layers-1)
         if len(state_shape) == 2:
@@ -286,7 +317,7 @@ class VectorEncoder(MLP):
 
 
 class VectorDecoder(MLP):
-    def __init__(self, state_shape, latent_dim, hidden_dim, num_layers=2):
+    def __init__(self, state_shape, latent_dim, hidden_dim, num_layers=3):
         super().__init__(latent_dim, state_shape[-1], hidden_dim,
                          num_layers=num_layers-1)
         if len(state_shape) == 2:
@@ -307,15 +338,71 @@ class VectorDecoder(MLP):
         return out
 
 
-class OrientationBelief(VectorDecoder):
-    def __init__(self, latent_dim, hidden_dim=128):
-        super().__init__((1,), latent_dim=latent_dim, hidden_dim=hidden_dim,
-                         num_layers=1)
+class NorthBelief(VectorDecoder):
+    def __init__(self, state_shape, latent_dim, hidden_dim=128,
+                 num_layers=3):
+        input_shape = list(state_shape)
+        input_shape[-1] = 1
+        super().__init__(input_shape, latent_dim=latent_dim, hidden_dim=hidden_dim,
+                         num_layers=num_layers)
         self.latent_types = ['rgb']
         self.target_types = ['vector']
 
     def obs2target(self, obs):
-        return obs[:, 12]
+        return obs[..., 13]
+
+    def compute_loss(self, orientation, orientation_true):        
+        oshape = orientation_true.shape
+        orientation = orientation.reshape(oshape[0], -1)
+        orientation_true = orientation_true.reshape(oshape[0], -1)
+        loss = angular_loss(orientation, orientation_true)
+        return loss.mean()
+
+
+class PositionBelief(VectorDecoder):
+    def __init__(self, state_shape, latent_dim, hidden_dim=128,
+                 num_layers=3):
+        input_shape = list(state_shape)
+        input_shape[-1] = 3
+        super().__init__(input_shape, latent_dim=latent_dim, hidden_dim=hidden_dim,
+                         num_layers=num_layers)
+        self.latent_types = ['rgb']
+        self.target_types = ['vector']
+        # torch.nn.utils.clip_grad_norm_(self.parameters(), 2.)
+
+    def obs2target(self, obs):
+        return obs[..., 6:9].squeeze()
+
+    def compute_loss(self, position, position_true):
+        oshape = position_true.shape
+        position = position.reshape(oshape[0], -1)
+        position_true = position_true.reshape(oshape[0], -1)
+        loss_x = 1 - (F.cosine_similarity(position[:, [0, 3, 6]], position_true[:, [0, 3, 6]]) + 1 ) / 2.
+        loss_y = 1 - (F.cosine_similarity(position[:, [1, 4, 7]], position_true[:, [1, 4, 7]]) + 1 ) / 2.
+        loss_z = 1 - (F.cosine_similarity(position[:, [2, 5, 8]], position_true[:, [2, 5, 8]]) + 1 ) / 2.
+        return (loss_x + loss_y + loss_z).mean()
+
+class OrientationBelief(VectorDecoder):
+    def __init__(self, state_shape, latent_dim, hidden_dim=128,
+                 num_layers=3):
+        input_shape = list(state_shape)
+        input_shape[-1] = 3
+        super().__init__(input_shape, latent_dim=latent_dim, hidden_dim=hidden_dim,
+                         num_layers=num_layers)
+        self.latent_types = ['rgb']
+        self.target_types = ['vector']
+
+    def obs2target(self, obs):
+        return obs[..., :3]
+
+    def compute_loss(self, inertial, inertial_true):
+        oshape = inertial_true.shape
+        inertial = inertial.reshape(oshape[0], -1)
+        inertial_true = inertial_true.reshape(oshape[0], -1)
+        loss_x = angular_loss(inertial[:, [0, 3, 6]], inertial_true[:, [0, 3, 6]])
+        loss_y = angular_loss(inertial[:, [1, 4, 7]], inertial_true[:, [1, 4, 7]])
+        loss_z = angular_loss(inertial[:, [2, 5, 8]], inertial_true[:, [2, 5, 8]])
+        return (loss_x + loss_y + loss_z).mean()
 
 
 class OdometryBelief(VectorDecoder):
@@ -327,7 +414,7 @@ class OdometryBelief(VectorDecoder):
                          hidden_dim=hidden_dim, num_layers=2)
         self.latent_types = ['rgb']
         self.target_types = ['vector']
-    
+
     # def forward(self, obs, detach=False):
     #     out = super().forward(obs, detach)
     #     # out = torch.tanh(out)
@@ -339,7 +426,7 @@ class OdometryBelief(VectorDecoder):
         # orientation_diff = obs[:, 12:13] - obs_t1[:, 12:13]
         # return torch.cat((inertial_diff, translational_diff, orientation_diff), dim=1)
         return obs[..., :13]
-        
+
 
 
 class PixelEncoder(nn.Module):

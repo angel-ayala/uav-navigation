@@ -141,23 +141,20 @@ class AEModel:
         summary_scalar(f'Loss/{self.type}/Encoder/Repeatibility', repeatability_loss.item())
         return repeatability_loss
 
-    def update_encoder(self, obs_t, obs_t1, actions):
+    def compute_srl_loss(self, obs_t, obs_t1, actions):
         actions_argmax = actions.argmax(-1)
         h_t = self(obs_t)
         h_t1 = self(obs_t1)
 
-        enc_loss = self.encoder_slowness(h_t)
-        enc_loss += self.encoder_variability(h_t, h_t1)
-        enc_loss += self.encoder_proportionality(h_t, h_t1, actions_argmax)
-        enc_loss += self.encoder_repeatability(h_t, h_t1, actions_argmax)
-        enc_loss *= 1e-3
-        summary_scalar(f'Loss/{self.type}/Encoder/S+V+P+R', enc_loss.item())
+        srl_loss = self.encoder_slowness(h_t)
+        srl_loss += self.encoder_variability(h_t, h_t1)
+        srl_loss += self.encoder_proportionality(h_t, h_t1, actions_argmax)
+        srl_loss += self.encoder_repeatability(h_t, h_t1, actions_argmax)
+        # enc_loss *= 1e-3
+        summary_scalar(f'Loss/{self.type}/Encoder/S+V+P+R', srl_loss.item())
+        return srl_loss
 
-        self.encoder_optim.zero_grad()
-        enc_loss.backward()
-        self.encoder_optim.step()
-
-    def optimize_reconstruction(self, obs, decoder_latent_lambda):
+    def compute_reconstruction_loss(self, obs, decoder_latent_lambda):
         rec_obs, h = self.reconstruct_obs(obs)
 
         if obs.dim() <= 3:
@@ -165,6 +162,7 @@ class AEModel:
         # preprocess images to be in [-0.5, 0.5] range
         target_obs = preprocess_obs(obs)
         rec_loss = F.mse_loss(target_obs, rec_obs)
+        summary_scalar(f'Loss/{self.type}/ReconstructionLoss', rec_loss.item())
 
         # add L2 penalty on latent representation
         # see https://arxiv.org/pdf/1903.12436.pdf
@@ -172,17 +170,7 @@ class AEModel:
         summary_scalar(f'Loss/{self.type}/EncoderActivation', latent_loss.item())
 
         rloss = rec_loss + decoder_latent_lambda * latent_loss
-        summary_scalar(f'Loss/{self.type}/Reconstruction', rloss.item())
-
-        # encoder optimizer
-        self.encoder_optim.zero_grad()
-        # decoder optimizer
-        self.decoder_optim[0].zero_grad()
-        rloss.backward()
-
-        self.encoder_optim.step()
-        self.decoder_optim[0].step()
-
+        summary_scalar(f'Loss/{self.type}/TotalLoss', rloss.item())
         return rloss
 
     def reconstruct_pose(self, obs_vector):
@@ -232,48 +220,3 @@ class AEModel:
         self.decoder_optim[1].step()
 
         return r_att_loss, r_pos_loss
-
-
-class PriorModel:
-    def __init__(self, belief_model):
-        self.model = belief_model
-
-    def sgd_optimizer(self, learning_rate=1e-5, momentum=0.9):
-        self.optimizer = optim.SGD(self.model.parameters(), lr=learning_rate,
-                                   momentum=momentum, nesterov=True)
-
-    def update(self, obs, obs_t1, actions, approximator):
-        obs_2d, obs_1d = approximator.format_obs(obs)
-        obs_2d_t1, obs_1d_t1 = approximator.format_obs(obs_t1)
-        log_prefix = f"Prior/{type(self.model).__name__}"
-        z = approximator.compute_z(obs, self.model.latent_types)
-        # add L2 penalty on latent representation
-        # see https://arxiv.org/pdf/1903.12436.pdf
-        # latent_loss = (0.5 * z.pow(2).sum(1)).mean()
-        # summary_scalar(f"{log_prefix}/EncoderActivation", latent_loss.item())
-        # print('z.shape', z.shape)
-        # print('actions', actions.shape)
-        # print('actions', actions.argmax(-1).unsqueeze(-1).shape)
-        # print('actions3', torch.cat((z, actions.argmax(-1).unsqueeze(-1)), dim=1).shape)
-        # hat_x = self.model(torch.cat((z, actions.argmax(-1).unsqueeze(-1)), dim=1))
-        hat_x = self.model(z)
-        # reconstruction loss
-        encoders = list()
-        if 'rgb' in self.model.target_types:
-            x_true = self.model.obs2target(obs_2d)
-        elif 'vector' in self.model.target_types:
-            x_true = self.model.obs2target(obs_1d)
-
-        for m in approximator.models:
-            if m.type in self.model.latent_types:
-                encoders.append(m)
-                break  # TODO add more models
-        prior_loss = F.mse_loss(x_true, hat_x)
-        summary_scalar(f"{log_prefix}/Reconstruction", prior_loss.item())
-        for e in encoders:
-            e.encoder_optim.zero_grad()
-        self.optimizer.zero_grad()
-        prior_loss.backward()
-        self.optimizer.step()
-        for e in encoders:
-            e.encoder_optim.step()

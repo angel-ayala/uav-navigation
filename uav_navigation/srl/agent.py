@@ -15,12 +15,13 @@ from uav_navigation.agent import QFunction
 from uav_navigation.agent import DDQNAgent
 from uav_navigation.agent import profile_q_approximator
 from uav_navigation.utils import profile_model
-from uav_navigation.utils import obs2tensor
+from uav_navigation.logger import summary_scalar
 from .net import weight_init
-# from .net import OrientationBelief
-from .net import OdometryBelief
+from .net import sgd_optimizer
+from .net import NorthBelief
+from .net import PositionBelief
+from .net import OrientationBelief
 from .autoencoder import AEModel
-from .autoencoder import PriorModel
 
 
 def profile_srl_approximator(approximator, state_shape, action_shape):
@@ -60,6 +61,8 @@ class SRLFunction(QFunction):
         super().__init__(q_app_fn, q_app_params, learning_rate, momentum,
                          tau=tau, use_cuda=use_cuda)
         self.models = list()
+        self.priors = list()
+        self.prior_optims = list()
         self.decoder_latent_lambda = decoder_latent_lambda
         self.is_multimodal = is_multimodal
 
@@ -71,6 +74,32 @@ class SRLFunction(QFunction):
         ae_model.apply(weight_init)
         ae_model.sgd_optimizer(encoder_lr, decoder_lr, decoder_weight_decay)
         self.models.append(ae_model)
+
+    def append_prior(self, prior_model, learning_rate=1e-3):
+        prior_model.to(self.device)
+        prior_model.apply(weight_init)
+        self.priors.append(prior_model)
+        self.prior_optims.append(sgd_optimizer(prior_model, learning_rate))
+
+    def compute_priors_loss(self, obs, obs_t1, actions):
+        obs_2d, obs_1d = self.format_obs(obs)
+        obs_2d_t1, obs_1d_t1 = self.format_obs(obs_t1)
+
+        loss_list = list()
+        for pmodel in self.priors:
+            log_prefix = f"Prior/{type(pmodel).__name__}"
+            z = self.compute_z(obs, pmodel.latent_types)
+            hat_x = pmodel(z)
+            if 'rgb' in pmodel.target_types:
+                x_true = pmodel.obs2target(obs_2d)
+            elif 'vector' in pmodel.target_types:
+                x_true = pmodel.obs2target(obs_1d)
+
+            loss = pmodel.compute_loss(hat_x, x_true)
+            summary_scalar(f"{log_prefix}/ReconstructionLoss", loss.item())
+            loss_list.append(loss)
+
+        return torch.stack(loss_list)
 
     def append_models(self, models):
         # ensure empty list
@@ -136,6 +165,29 @@ class SRLFunction(QFunction):
         super().update(td_loss)
         for m in self.models:
             m.encoder_optim.step()
+
+    def update_encoder(self, enc_loss):
+        for m in self.models:
+            m.encoder_optim.zero_grad()
+        enc_loss.backward()
+        for m in self.models:
+            m.encoder_optim.step()
+
+    def update_reconstruction(self, r_loss):
+        for m in self.models:
+            for d in m.decoder_optim:
+                d.zero_grad()
+        self.update_encoder(r_loss)
+        for m in self.models:
+            for d in m.decoder_optim:
+                d.step()
+
+    def update_representation(self, r_loss):
+        for optim in self.prior_optims:
+            optim.zero_grad()
+        self.update_reconstruction(r_loss)
+        for optim in self.prior_optims:
+            optim.step()
 
     def save(self, path, ae_models, encoder_only=False):
         q_app_path = str(path) + "_q_function.pth"
@@ -207,7 +259,9 @@ class SRLDDQNAgent(DDQNAgent):
                  epsilon_start=1.0,
                  epsilon_end=0.01,
                  epsilon_steps=500000,
-                 memory_buffer=None):
+                 memory_buffer=None,
+                 srl_loss=False,
+                 priors=False):
         super().__init__(
             state_shape,
             action_shape,
@@ -219,45 +273,47 @@ class SRLDDQNAgent(DDQNAgent):
             memory_buffer=memory_buffer)
 
         self.ae_models = ae_models
-        self.prior_models = list()
-
-    def init_priors(self):
-        # bmodel = OrientationBelief(50)
-        bmodel = OdometryBelief(self.state_shape[1], 50)
-        self.prior_models.append(PriorModel(bmodel))
-        self.prior_models[-1].sgd_optimizer()
+        self.init_models()
+        self.priors = priors
+        self.srl_loss = srl_loss
+        if priors:
+            self.init_priors()
 
     def init_models(self):
         self.approximator.append_models(self.ae_models)
+
+    def init_priors(self):
+        self.approximator.append_prior(NorthBelief(self.state_shape[1], 50))
+        self.approximator.append_prior(OrientationBelief(self.state_shape[1], 50), learning_rate=1e-4)
+        self.approximator.append_prior(PositionBelief(self.state_shape[1], 50), learning_rate=1e-4)
 
     def update_representation(self, obs, obs_t1, actions):
         obs_2d, obs_1d = self.approximator.format_obs(obs)
         obs_2d_t1, obs_1d_t1 = self.approximator.format_obs(obs_t1)
 
+        total_loss = list()
+        srl_loss = list()
         for ae_model in self.approximator.models:
             if ae_model.type in ["rgb"]:
-                ae_model.optimize_reconstruction(
-                    obs_2d, self.approximator.decoder_latent_lambda)
+                loss = ae_model.compute_reconstruction_loss(obs_2d, self.approximator.decoder_latent_lambda)
+                total_loss.append(loss)
+                if self.srl_loss:
+                    srl_loss.append(ae_model.compute_srl_loss(obs_2d, obs_2d_t1, actions))
             if ae_model.type in ["vector"]:
-                ae_model.optimize_reconstruction(
-                    obs_1d, self.approximator.decoder_latent_lambda)
-            if ae_model.type in ["imu2pose"]:
-                ae_model.optimize_pose(
-                    obs_1d, self.approximator.decoder_latent_lambda)
+                loss = ae_model.compute_reconstruction_loss(obs_1d, self.approximator.decoder_latent_lambda)
+                total_loss.append(loss)
+                if self.srl_loss:
+                    srl_loss.append(ae_model.compute_srl_loss(obs_1d, obs_1d_t1, actions))
 
-    def update_encoder(self, obs, obs_t1, actions):
-        obs_2d, obs_1d = self.approximator.format_obs(obs)
-        obs_2d_t1, obs_1d_t1 = self.approximator.format_obs(obs_t1)
-        for ae_model in self.approximator.models:
-            if ae_model.type in ["rgb"]:
-                ae_model.update_encoder(obs_2d, obs_2d_t1, actions)
-            if ae_model.type in ["vector", "imu2pose"]:
-                ae_model.update_encoder(obs_1d, obs_1d_t1, actions)
+        tloss = torch.mean(torch.stack(total_loss))
+        if self.priors:
+            prior_loss = self.approximator.compute_priors_loss(obs, obs_t1, actions)
+            tloss += prior_loss.sum() * 0.1
+        if self.srl_loss:
+            tloss += torch.mean(torch.stack(srl_loss))
 
-
-    def update_priors(self, obs, obs_t1, actions):
-        for pmodel in self.prior_models:
-            pmodel.update(obs, obs_t1, actions, self.approximator)
+        summary_scalar("Loss/Representation/TotalLoss", tloss.item())
+        self.approximator.update_representation(tloss)
 
     def update(self):
         # Update the Q-network if replay buffer is sufficiently large
@@ -271,8 +327,6 @@ class SRLDDQNAgent(DDQNAgent):
             obs_data_t1 = sampled_data[0][3] if self.is_prioritized else sampled_data[3]
             actions_data = sampled_data[0][1] if self.is_prioritized else sampled_data[1]
             self.update_representation(obs_data, obs_data_t1, actions_data)
-            self.update_encoder(obs_data, obs_data_t1, actions_data)
-            self.update_priors(obs_data, obs_data_t1, actions_data)
 
     def save(self, path, encoder_only=False):
         self.approximator.save(path, ae_models=self.ae_models)

@@ -128,6 +128,10 @@ def parse_args():
                          help='Whether if use the Pose reconstruction model.')
     arg_srl.add_argument("--model-vector", action='store_true',
                          help='Whether if use the Vector reconstruction model.')
+    arg_srl.add_argument("--use-priors", action='store_true',
+                         help='Whether if use the Prior models.')
+    arg_srl.add_argument("--use-srl-loss", action='store_true',
+                         help='Whether if use the SRL loss.')
 
     arg_training = parser.add_argument_group('Training')
     arg_training.add_argument("--steps", type=int, default=450000,  # 25h at 25 frames
@@ -264,6 +268,8 @@ if __name__ == '__main__':
         approximator_params['q_app_params']['latent_dim'] *= len(
             ae_models.keys())
         agent_params['ae_models'] = ae_models
+        agent_params['srl_loss'] = args.use_srl_loss
+        agent_params['priors'] = args.use_priors
     else:
         agent_class = DDQNAgent
         q_approximator = QFunction
@@ -296,8 +302,6 @@ if __name__ == '__main__':
     memory_buffer = memory_class(**memory_params)
     agent_params.update(dict(memory_buffer=memory_buffer))
     agent = agent_class(**agent_params)
-    agent.init_models()
-    agent.init_priors()
     # update params to save info
     memory_params.update(dict(is_prioritized=args.memory_prioritized))
     agent_params.update(dict(memory_buffer=memory_params))
