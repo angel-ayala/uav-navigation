@@ -17,7 +17,7 @@ from uav_navigation.agent import profile_q_approximator
 from uav_navigation.utils import profile_model
 from uav_navigation.logger import summary_scalar
 from .net import weight_init
-from .net import sgd_optimizer
+from .net import PriorModel
 from .net import NorthBelief
 from .net import PositionBelief
 from .net import OrientationBelief
@@ -59,7 +59,6 @@ class SRLFunction(QFunction):
                          tau=tau, use_cuda=use_cuda)
         self.models = list()
         self.priors = list()
-        self.prior_optims = list()
         self.decoder_latent_lambda = decoder_latent_lambda
         self.is_multimodal = is_multimodal
 
@@ -72,11 +71,11 @@ class SRLFunction(QFunction):
         ae_model.sgd_optimizer(encoder_lr, decoder_lr, decoder_weight_decay)
         self.models.append(ae_model)
 
-    def append_prior(self, prior_model, learning_rate=1e-3):
-        prior_model.to(self.device)
-        prior_model.apply(weight_init)
-        self.priors.append(prior_model)
-        self.prior_optims.append(sgd_optimizer(prior_model, learning_rate))
+    def append_prior(self, belief_model, learning_rate=1e-3):
+        belief_model.to(self.device)
+        belief_model.apply(weight_init)
+        self.priors.append(PriorModel(belief_model))
+        self.priors[-1].sgd_optimizer(learning_rate=learning_rate)
 
     def compute_priors_loss(self, obs, obs_t1, actions):
         obs_2d, obs_1d = self.format_obs(obs)
@@ -84,16 +83,15 @@ class SRLFunction(QFunction):
 
         loss_list = list()
         for pmodel in self.priors:
-            log_prefix = f"Prior/{type(pmodel).__name__}"
-            z = self.compute_z(obs, pmodel.latent_types)
+            z = self.compute_z(obs, pmodel.latent_source)
             hat_x = pmodel(z)
-            if 'rgb' in pmodel.target_types:
+            if 'rgb' in pmodel.obs_target:
                 x_true = pmodel.obs2target(obs_2d)
-            elif 'vector' in pmodel.target_types:
+            elif 'vector' in pmodel.obs_target:
                 x_true = pmodel.obs2target(obs_1d)
 
             loss = pmodel.compute_loss(hat_x, x_true)
-            summary_scalar(f"{log_prefix}/ReconstructionLoss", loss.item())
+            summary_scalar(f"Prior/{pmodel.name}/ReconstructionLoss", loss.item())
             loss_list.append(loss)
 
         return torch.stack(loss_list)
@@ -180,11 +178,11 @@ class SRLFunction(QFunction):
                 d.step()
 
     def update_representation(self, r_loss):
-        for optim in self.prior_optims:
-            optim.zero_grad()
+        for bmodel in self.priors:
+            bmodel.optimizer_zero_grad()
         self.update_reconstruction(r_loss)
-        for optim in self.prior_optims:
-            optim.step()
+        for bmodel in self.priors:
+            bmodel.optimizer_step()
 
     def save(self, path, ae_models, encoder_only=False):
         q_app_path = str(path) + "_q_function.pth"
@@ -305,7 +303,7 @@ class SRLDDQNAgent(DDQNAgent):
         tloss = torch.mean(torch.stack(total_loss))
         if self.priors:
             prior_loss = self.approximator.compute_priors_loss(obs, obs_t1, actions)
-            tloss += prior_loss.sum() * 0.1
+            tloss += prior_loss.mean() * 0.1
         if self.srl_loss:
             tloss += torch.mean(torch.stack(srl_loss)) * 0.1  # \times lambda
 

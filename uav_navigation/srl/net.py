@@ -245,12 +245,12 @@ class MLP(nn.Module):
 
     def __init__(self, n_input, n_output, hidden_dim, num_layers=3):
         super().__init__()
-        self.num_layers = num_layers
         self.h_layers = nn.ModuleList([nn.Linear(n_input, hidden_dim)])
         for i in range(num_layers - 1):
             self.h_layers.append(nn.Linear(hidden_dim, hidden_dim))
-        self.h_layers.insert(len(self.h_layers) - 1, nn.Dropout(0.2))
+        self.h_layers.append(nn.Dropout(0.2))
         self.h_layers.append(nn.Linear(hidden_dim, n_output))
+        self.num_layers = len(self.h_layers)
 
     def forward(self, obs, detach=False):
         h = obs
@@ -338,71 +338,77 @@ class VectorDecoder(MLP):
         return out
 
 
-class NorthBelief(VectorDecoder):
+class PriorModel:
+    def __init__(self, model, latent_source=['rgb'], obs_target=['vector']):
+        self.model = model
+        self.name = type(model).__name__
+        self.optimizer = None
+        self.latent_source = latent_source
+        self.obs_target = obs_target
+        self.avg_model = optim.swa_utils.AveragedModel(model)
+
+    def sgd_optimizer(self, learning_rate, momentum=0.9, **kwargs):
+        self.optimizer = sgd_optimizer(self.model, learning_rate=learning_rate,
+                                       momentum=momentum, **kwargs)
+
+    def obs2target(self, observations):
+        return self.model.obs2target(observations)
+
+    def compute_loss(self, values_pred, values_true):
+        return self.model.compute_loss(values_pred, values_true)
+    
+    def optimizer_zero_grad(self):
+        self.optimizer.zero_grad()
+
+    def optimizer_step(self):
+        self.optimizer.step()
+        self.avg_model.update_parameters(self.model)
+    
+    def __call__(self, x):
+        return self.model(x)
+
+
+class NorthBelief(MLP):
     def __init__(self, state_shape, latent_dim, hidden_dim=128,
                  num_layers=3):
-        input_shape = list(state_shape)
-        input_shape[-1] = 1
-        super().__init__(input_shape, latent_dim=latent_dim, hidden_dim=hidden_dim,
+        super().__init__(latent_dim, 2, hidden_dim=hidden_dim,
                          num_layers=num_layers)
-        self.latent_types = ['rgb']
-        self.target_types = ['vector']
 
     def obs2target(self, obs):
-        return obs[..., 13]
+        return obs[:, -1, [3, 13]]
 
-    def compute_loss(self, orientation, orientation_true):        
-        oshape = orientation_true.shape
-        orientation = orientation.reshape(oshape[0], -1)
-        orientation_true = orientation_true.reshape(oshape[0], -1)
-        loss = angular_loss(orientation, orientation_true)
+    def compute_loss(self, orientation, orientation_true):
+        loss = F.mse_loss(orientation, orientation_true)
         return loss.mean()
 
 
-class PositionBelief(VectorDecoder):
+class PositionBelief(MLP):
     def __init__(self, state_shape, latent_dim, hidden_dim=128,
                  num_layers=3):
-        input_shape = list(state_shape)
-        input_shape[-1] = 3
-        super().__init__(input_shape, latent_dim=latent_dim, hidden_dim=hidden_dim,
+        super().__init__(latent_dim, 3, hidden_dim=hidden_dim,
                          num_layers=num_layers)
-        self.latent_types = ['rgb']
-        self.target_types = ['vector']
-        # torch.nn.utils.clip_grad_norm_(self.parameters(), 2.)
 
     def obs2target(self, obs):
-        return obs[..., 6:9].squeeze()
+        return obs[:, -1, 6:9]
 
     def compute_loss(self, position, position_true):
-        oshape = position_true.shape
-        position = position.reshape(oshape[0], -1)
-        position_true = position_true.reshape(oshape[0], -1)
-        loss_x = 1 - (F.cosine_similarity(position[:, [0, 3, 6]], position_true[:, [0, 3, 6]]) + 1 ) / 2.
-        loss_y = 1 - (F.cosine_similarity(position[:, [1, 4, 7]], position_true[:, [1, 4, 7]]) + 1 ) / 2.
-        loss_z = 1 - (F.cosine_similarity(position[:, [2, 5, 8]], position_true[:, [2, 5, 8]]) + 1 ) / 2.
-        return (loss_x + loss_y + loss_z).mean()
+        loss = 1 - (F.cosine_similarity(position, position_true) + 1 ) / 2.
+        return loss.mean()
 
-class OrientationBelief(VectorDecoder):
+
+class OrientationBelief(MLP):
     def __init__(self, state_shape, latent_dim, hidden_dim=128,
                  num_layers=3):
-        input_shape = list(state_shape)
-        input_shape[-1] = 3
-        super().__init__(input_shape, latent_dim=latent_dim, hidden_dim=hidden_dim,
+        super().__init__(latent_dim, 2, hidden_dim=hidden_dim,
                          num_layers=num_layers)
-        self.latent_types = ['rgb']
-        self.target_types = ['vector']
+        # torch.nn.utils.clip_grad_norm_(self.parameters(), 0.1)
 
     def obs2target(self, obs):
-        return obs[..., :3]
+        return obs[:, -1, :2]
 
     def compute_loss(self, inertial, inertial_true):
-        oshape = inertial_true.shape
-        inertial = inertial.reshape(oshape[0], -1)
-        inertial_true = inertial_true.reshape(oshape[0], -1)
-        loss_x = angular_loss(inertial[:, [0, 3, 6]], inertial_true[:, [0, 3, 6]])
-        loss_y = angular_loss(inertial[:, [1, 4, 7]], inertial_true[:, [1, 4, 7]])
-        loss_z = angular_loss(inertial[:, [2, 5, 8]], inertial_true[:, [2, 5, 8]])
-        return (loss_x + loss_y + loss_z).mean()
+        loss = F.mse_loss(inertial, inertial_true)
+        return loss.mean()
 
 
 class OdometryBelief(VectorDecoder):
