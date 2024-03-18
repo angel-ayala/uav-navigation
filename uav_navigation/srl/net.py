@@ -240,6 +240,32 @@ def angular_loss(orientation, orientation_true):
     return loss
 
 
+def circular_difference(predicted_angles, real_angles):
+    """
+    Calculates the circular difference between predicted and real angles in a batch.
+    
+    Args:
+      predicted_angles: A PyTorch tensor of shape (batch_size, 3) containing predicted angles in radians.
+      real_angles: A PyTorch tensor of shape (batch_size, 3) containing real angles in radians.
+    
+    Returns:
+      A PyTorch tensor of shape (batch_size) containing the circular difference for each batch element.
+    """
+    
+    # No conversion needed since angles are already in radians
+    
+    # Calculate absolute difference considering rotations
+    diff = torch.abs(predicted_angles - real_angles)
+    wrapped_diff1 = torch.abs(predicted_angles + torch.tensor(2*torch.pi) - real_angles)
+    wrapped_diff2 = torch.abs(predicted_angles - real_angles - torch.tensor(2*torch.pi))
+    
+    # Find minimum difference among original and wrapped values
+    min_diffs = torch.min(torch.stack([diff, wrapped_diff1, wrapped_diff2]), dim=0)[0]  # Find minimum along first dimension
+    circular_diff = torch.min(min_diffs, dim=1).values  # Find minimum along second dimension
+
+    return circular_diff
+
+
 class MLP(nn.Module):
     """MLP for q-function."""
 
@@ -378,8 +404,13 @@ class NorthBelief(MLP):
         return obs[:, -1, [3, 13]]
 
     def compute_loss(self, orientation, orientation_true):
-        loss = F.mse_loss(orientation, orientation_true)
-        return loss.mean()
+        orientation = orientation + 2 * torch.pi
+        orientation_true = orientation_true + 2 * torch.pi
+        loss = circular_difference(orientation, orientation_true)
+        # loss = F.mse_loss(orientation, orientation_true)
+        # loss = 1 - (F.cosine_similarity(orientation, orientation_true) + 1 ) / 2.
+        # loss = loss.abs()
+        return loss.mean() #* 0.1
 
 
 class PositionBelief(MLP):
@@ -392,8 +423,9 @@ class PositionBelief(MLP):
         return obs[:, -1, 6:9]
 
     def compute_loss(self, position, position_true):
-        loss = 1 - (F.cosine_similarity(position, position_true) + 1 ) / 2.
-        return loss.mean()
+        # loss = F.smooth_l1_loss(position, position_true, beta=2.)
+        loss = F.huber_loss(position, position_true, delta=2.)
+        return loss.mean() #* 0.1
 
 
 class OrientationBelief(MLP):
@@ -407,7 +439,12 @@ class OrientationBelief(MLP):
         return obs[:, -1, :2]
 
     def compute_loss(self, inertial, inertial_true):
-        loss = F.mse_loss(inertial, inertial_true)
+        inertial = inertial + 2 * torch.pi
+        inertial_true = inertial_true + 2 * torch.pi
+        # loss = 1 - (F.cosine_similarity(inertial, inertial_true) + 1 ) / 2.
+        # loss = F.mse_loss(inertial, inertial_true)
+        loss = circular_difference(inertial, inertial_true)
+        # loss = loss.abs()
         return loss.mean()
 
 

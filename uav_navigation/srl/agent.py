@@ -280,7 +280,7 @@ class SRLDDQNAgent(DDQNAgent):
     def init_priors(self):
         self.approximator.append_prior(NorthBelief(self.state_shape[1], 50))
         self.approximator.append_prior(OrientationBelief(self.state_shape[1], 50), learning_rate=1e-4)
-        self.approximator.append_prior(PositionBelief(self.state_shape[1], 50), learning_rate=1e-4)
+        self.approximator.append_prior(PositionBelief(self.state_shape[1], 50), learning_rate=1e-3)
 
     def update_representation(self, obs, obs_t1, actions):
         obs_2d, obs_1d = self.approximator.format_obs(obs)
