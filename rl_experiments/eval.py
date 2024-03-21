@@ -167,6 +167,7 @@ def run_evaluation(seed_val, logpath, episode):
         agent.load(logpath / agent_path)
         store_callback = StoreStepData(
             logpath / f"history_eval_{log_ep+1:03d}.csv")
+        store_callback._ep = log_ep
         for fc in target_pos:
             evaluate_agent(agent, env, training_params['eval_epsilon'],
                            args.eval_steps,

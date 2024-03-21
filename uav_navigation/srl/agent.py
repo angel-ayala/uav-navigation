@@ -9,13 +9,14 @@ Based on:
 https://arxiv.org/abs/1910.01741
 """
 import torch
+from torchvision.transforms import AutoAugment
 import numpy as np
 from thop import clever_format
 from uav_navigation.agent import QFunction
 from uav_navigation.agent import DDQNAgent
 from uav_navigation.agent import profile_q_approximator
-from uav_navigation.utils import profile_model
 from uav_navigation.logger import summary_scalar
+from webots_drone.envs.preprocessor import normalize_pixels
 from .net import weight_init
 from .net import PriorModel
 from .net import NorthBelief
@@ -61,6 +62,7 @@ class SRLFunction(QFunction):
         self.priors = list()
         self.decoder_latent_lambda = decoder_latent_lambda
         self.is_multimodal = is_multimodal
+        self.augment_model = AutoAugment()
 
     def append_autoencoder(self, ae_model,
                            encoder_lr,
@@ -75,7 +77,8 @@ class SRLFunction(QFunction):
         belief_model.to(self.device)
         belief_model.apply(weight_init)
         self.priors.append(PriorModel(belief_model))
-        self.priors[-1].sgd_optimizer(learning_rate=learning_rate)
+        # self.priors[-1].sgd_optimizer(learning_rate=learning_rate)
+        self.priors[-1].adabelief_optimizer(learning_rate=learning_rate)
 
     def compute_priors_loss(self, obs, obs_t1, actions):
         obs_2d, obs_1d = self.format_obs(obs)
@@ -123,7 +126,7 @@ class SRLFunction(QFunction):
         z_hat = torch.cat(z_hat, dim=1)
         return z_hat
 
-    def format_obs(self, obs):
+    def format_obs(self, obs, augment=False):
         if self.is_multimodal:
             obs_2d = obs[0]
             obs_1d = obs[1]
@@ -133,6 +136,9 @@ class SRLFunction(QFunction):
 
         if not torch.is_tensor(obs_2d):
             obs_2d = np.array(obs_2d)
+            if augment:
+                obs_2d = self.augment_model(obs_2d)
+            obs_2d = normalize_pixels(obs_2d)
             obs_2d = torch.tensor(obs_2d, dtype=torch.float32)
         if not torch.is_tensor(obs_1d):
             obs_1d = np.array(obs_1d)
@@ -280,11 +286,11 @@ class SRLDDQNAgent(DDQNAgent):
     def init_priors(self):
         self.approximator.append_prior(NorthBelief(self.state_shape[1], 50))
         self.approximator.append_prior(OrientationBelief(self.state_shape[1], 50), learning_rate=1e-4)
-        self.approximator.append_prior(PositionBelief(self.state_shape[1], 50), learning_rate=1e-3)
+        self.approximator.append_prior(PositionBelief(self.state_shape[1], 50), learning_rate=1e-4)
 
-    def update_representation(self, obs, obs_t1, actions):
-        obs_2d, obs_1d = self.approximator.format_obs(obs)
-        obs_2d_t1, obs_1d_t1 = self.approximator.format_obs(obs_t1)
+    def update_representation(self, obs, actions, rewards, obs_t1):
+        obs_2d, obs_1d = self.approximator.format_obs(obs, augment=True)
+        obs_2d_t1, obs_1d_t1 = self.approximator.format_obs(obs_t1, augment=True)
 
         total_loss = list()
         srl_loss = list()
@@ -293,12 +299,13 @@ class SRLDDQNAgent(DDQNAgent):
                 loss = ae_model.compute_reconstruction_loss(obs_2d, self.approximator.decoder_latent_lambda)
                 total_loss.append(loss)
                 if self.srl_loss:
-                    srl_loss.append(ae_model.compute_srl_loss(obs_2d, obs_2d_t1, actions))
+                    # srl_loss.append(ae_model.compute_srl_loss(obs_2d, obs_2d_t1, actions))
+                    srl_loss.append(ae_model.compute_state_priors(obs_2d, actions, rewards, obs_2d_t1))
             if ae_model.type in ["vector"]:
                 loss = ae_model.compute_reconstruction_loss(obs_1d, self.approximator.decoder_latent_lambda)
                 total_loss.append(loss)
                 if self.srl_loss:
-                    srl_loss.append(ae_model.compute_srl_loss(obs_1d, obs_1d_t1, actions))
+                    srl_loss.append(ae_model.compute_state_priors(obs_1d, actions, rewards, obs_1d_t1))
 
         tloss = torch.mean(torch.stack(total_loss))
         if self.priors:
@@ -319,9 +326,10 @@ class SRLDDQNAgent(DDQNAgent):
             self.approximator.update(td_loss)
             # update the autoencoder
             obs_data = sampled_data[0][0] if self.is_prioritized else sampled_data[0]
-            obs_data_t1 = sampled_data[0][3] if self.is_prioritized else sampled_data[3]
             actions_data = sampled_data[0][1] if self.is_prioritized else sampled_data[1]
-            self.update_representation(obs_data, obs_data_t1, actions_data)
+            rewards_data = sampled_data[0][2] if self.is_prioritized else sampled_data[2]
+            obs_data_t1 = sampled_data[0][3] if self.is_prioritized else sampled_data[3]
+            self.update_representation(obs_data, actions_data, rewards_data, obs_data_t1)
 
     def save(self, path, encoder_only=False):
         self.approximator.save(path, ae_models=self.ae_models)

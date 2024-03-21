@@ -28,6 +28,8 @@ from .net import BiGRU
 def profile_ae_model(ae_model, state_shape, device):
     total_flops, total_params = 0, 0
     flops, params = profile_model(ae_model.encoder, state_shape, device)
+    total_flops += flops
+    total_params += params
     print('Encoder {}: {} flops, {} params'.format(
         ae_model.type, *clever_format([flops, params], "%.3f")))
     # profile decode stage
@@ -135,9 +137,9 @@ class AEModel:
         for dec in self.decoder:
             dec.apply(function)
 
-    def encoder_slowness(self, h):
+    def encoder_slowness(self, h_t, h_t1):
         # Compute slowness cost
-        slowness_loss = slowness_cost(h)
+        slowness_loss = slowness_cost(h_t, h_t1)
         summary_scalar(f'Loss/{self.type}/Encoder/Slowness', slowness_loss.item())
         return slowness_loss
 
@@ -159,15 +161,59 @@ class AEModel:
         summary_scalar(f'Loss/{self.type}/Encoder/Repeatibility', repeatability_loss.item())
         return repeatability_loss
 
+    def compute_state_priors(self, obs_t, actions, rewards, obs_t1):
+        actions_argmax = actions.argmax(-1)
+        s_t = self(obs_t)
+        s_t1 = self(obs_t1)
+
+        state_diff = s_t1 - s_t
+        state_diff_norm = torch.norm(state_diff, p=2., dim=-1)
+        similarity = lambda x, y: torch.norm(x - y, p=2., dim=-1)
+
+        slowness_loss = (state_diff_norm ** 2).mean()
+        # variability_loss = torch.exp(-similarity(s_t, s_t1)).mean()
+
+        # equal actions
+        actions_unique, actions_count = torch.unique(actions_argmax, return_counts=True)
+        actions_unique = actions_unique[actions_count > 1]
+        causality_loss = 0.
+        proportionality_loss = 0.
+        repeatability_loss = 0.
+        for a in actions_unique:
+            actions_mask = actions_argmax == a
+            proportionality_loss += (torch.diff(state_diff_norm[actions_mask], dim=0) ** 2.).mean()
+            repeatability_loss += torch.exp(-similarity(s_t1[actions_mask], s_t[actions_mask]) ** 2).mean() *\
+                (torch.norm(torch.diff(state_diff[actions_mask], dim=0), p=2., dim=-1) ** 2.).mean()
+            # print('rewards', rewards[actions_mask].shape)
+            # print('rewards', actions_mask.nonzero())
+            # print('rewards2', torch.diff(rewards[actions_mask], dim=0).shape)
+            # print('rewards2', torch.diff(rewards[actions_mask], dim=0))
+            # causality_mask = torch.logical_and(actions_mask, torch.diff(rewards[actions_mask], dim=0) != 0.)
+            # if torch.diff(rewards[actions_mask], dim=0) != 0.:
+            for i, r_diff in enumerate(torch.diff(rewards[actions_mask], dim=0)):
+                amask1 = actions_mask.nonzero().flatten()[i]
+                amask2 = actions_mask.nonzero().flatten()[i+1]
+                if r_diff != 0:
+                    causality_loss += torch.exp(-similarity(s_t1[amask1], s_t1[amask2]) ** 2).mean()
+        summary_scalar(f'Loss/{self.type}/Encoder/Slowness', slowness_loss.item())
+        # summary_scalar(f'Loss/{self.type}/Encoder/Variability', variability_loss.item())
+        summary_scalar(f'Loss/{self.type}/Encoder/Causality', causality_loss.item())
+        summary_scalar(f'Loss/{self.type}/Encoder/Proportionality', proportionality_loss.item())
+        summary_scalar(f'Loss/{self.type}/Encoder/Repeatibility', repeatability_loss.item())
+        # state_priors_loss = slowness_loss + variability_loss + proportionality_loss + repeatability_loss
+        state_priors_loss = slowness_loss + causality_loss + proportionality_loss + repeatability_loss
+        summary_scalar(f'Loss/{self.type}/Encoder/S+V+P+R', state_priors_loss.item())
+        return state_priors_loss
+
     def compute_srl_loss(self, obs_t, obs_t1, actions):
         actions_argmax = actions.argmax(-1)
         h_t = self(obs_t)
         h_t1 = self(obs_t1)
 
-        srl_loss = self.encoder_slowness(h_t)
-        srl_loss += self.encoder_variability(h_t, h_t1)
-        srl_loss += self.encoder_proportionality(h_t, h_t1, actions_argmax)
-        srl_loss += self.encoder_repeatability(h_t, h_t1, actions_argmax)
+        srl_loss = self.encoder_slowness(h_t, h_t1)
+        # srl_loss += self.encoder_variability(h_t, h_t1)
+        # srl_loss += self.encoder_proportionality(h_t, h_t1, actions_argmax)
+        # srl_loss += self.encoder_repeatability(h_t, h_t1, actions_argmax)
         # enc_loss *= 1e-3
         summary_scalar(f'Loss/{self.type}/Encoder/S+V+P+R', srl_loss.item())
         return srl_loss

@@ -13,6 +13,7 @@ import numpy as np
 from torch import nn
 from torch import optim
 from torch.nn import functional as F
+from adabelief_pytorch import AdaBelief
 
 
 OUT_DIM = {2: 39, 4: 35, 6: 31}
@@ -43,6 +44,11 @@ def tie_weights(src, trg):
 def sgd_optimizer(model, learning_rate=1e-5, momentum=0.9, **kwargs):
     return optim.SGD(model.parameters(), lr=learning_rate, momentum=momentum,
                      nesterov=True, **kwargs)
+
+
+def adabelief_optimizer(model, learning_rate=1e-3):
+    return AdaBelief(model.parameters(), lr=learning_rate, eps=1e-16,
+                     betas=(0.9, 0.999), weight_decouple=True, rectify=False)
 
 
 def preprocess_obs(obs, bits=5):
@@ -85,12 +91,14 @@ def q_function(latent_dim, action_shape, hidden_dim, num_layers=2):
     return VectorDecoder(action_shape, latent_dim, hidden_dim, num_layers=num_layers)
 
 
-def slowness_cost(encoded_batch, lambda_=0.1):
+def slowness_cost(h_t, h_t1):
     """
     Compute the slowness cost for a batch of encoded representations.
 
     Parameters:
-    - encoded_batch: A 2D PyTorch tensor representing the batch of encoded representations.
+    - h_t: A 2D PyTorch tensor representing the batch of encoded representations in moment t.
+                     Each row represents one encoded representation.
+    - h_t1: A 2D PyTorch tensor representing the batch of encoded representations in moment t+1.
                      Each row represents one encoded representation.
     - lambda_: A regularization parameter controlling the strength of the penalty.
 
@@ -98,15 +106,13 @@ def slowness_cost(encoded_batch, lambda_=0.1):
     - slowness: The slowness cost.
     """
     # Compute differences between consecutive encoded representations
-    differences = encoded_batch[:, 1:] - encoded_batch[:, :-1]
+    differences = h_t1 - h_t
 
     # Compute squared norm of differences
     squared_norms = torch.norm(differences, p=2, dim=-1) ** 2
 
     # Compute mean squared norm
-    slowness = lambda_ * torch.mean(squared_norms)
-
-    return slowness
+    return torch.mean(squared_norms)
 
 
 def variability_cost(h_t, h_t1):
@@ -129,8 +135,8 @@ def variability_cost(h_t, h_t1):
     exponential_neg_distances = torch.exp(-pairwise_distances)
 
     # Exclude self-distances (diagonal elements)
-    mask = torch.eye(h_t.size(0), dtype=torch.bool, device=h_t.device)
-    exponential_neg_distances = exponential_neg_distances.masked_fill(mask, 0)
+    # mask = torch.eye(h_t.size(0), dtype=torch.bool, device=h_t.device)
+    # exponential_neg_distances = exponential_neg_distances.masked_fill(mask, 0)
 
     # Compute mean of exponential distances
     variability = torch.mean(exponential_neg_distances)
@@ -377,6 +383,10 @@ class PriorModel:
         self.optimizer = sgd_optimizer(self.model, learning_rate=learning_rate,
                                        momentum=momentum, **kwargs)
 
+    def adabelief_optimizer(self, learning_rate):
+        self.optimizer = adabelief_optimizer(self.model,
+                                             learning_rate=learning_rate)
+
     def obs2target(self, observations):
         return self.model.obs2target(observations)
 
@@ -410,7 +420,7 @@ class NorthBelief(MLP):
         # loss = F.mse_loss(orientation, orientation_true)
         # loss = 1 - (F.cosine_similarity(orientation, orientation_true) + 1 ) / 2.
         # loss = loss.abs()
-        return loss.mean() #* 0.1
+        return loss.mean() * 0.1
 
 
 class PositionBelief(MLP):
@@ -425,7 +435,7 @@ class PositionBelief(MLP):
     def compute_loss(self, position, position_true):
         # loss = F.smooth_l1_loss(position, position_true, beta=2.)
         loss = F.huber_loss(position, position_true, delta=2.)
-        return loss.mean() #* 0.1
+        return loss.mean() * 0.1
 
 
 class OrientationBelief(MLP):
