@@ -7,11 +7,13 @@ Created on Fri Jan 26 15:28:24 2024
 """
 
 import torch
+import torchvision
 from torch.nn import functional as F
 from torch import optim
 from thop import clever_format
 from uav_navigation.utils import profile_model
 from uav_navigation.logger import summary_scalar
+from uav_navigation.logger import summary_image
 
 from .net import preprocess_obs
 from .net import rgb_reconstruction_model
@@ -21,6 +23,7 @@ from .net import slowness_cost
 from .net import variability_cost
 from .net import proportionality_cost
 from .net import repeatability_cost
+from .net import adabelief_optimizer
 from .net import BiGRU
 
 
@@ -43,6 +46,7 @@ def profile_ae_model(ae_model, state_shape, device):
 
 
 class AEModel:
+    LOG_FREQ = 50
 
     def __init__(self, ae_type, ae_params, encoder_only=False):
         self.type = ae_type
@@ -71,6 +75,7 @@ class AEModel:
             self.decoder = list()
         elif type(self.decoder) is not tuple:
             self.decoder = [self.decoder]
+        self.n_calls = 0
 
     def adam_optimizer(self, encoder_lr, decoders_lr, decoder_weight_decay):
         if type(decoders_lr) is not list:
@@ -97,6 +102,18 @@ class AEModel:
                                             momentum=0.9,
                                             weight_decay=decoder_weight_decay,
                                             nesterov=True)
+                                  for i, decoder_lr in enumerate(decoders_lr)]
+        else:
+            self.decoder_optim = list()
+
+    def adabelief_optimizer(self, encoder_lr, decoders_lr, decoder_weight_decay):
+        if type(decoders_lr) is not list:
+            decoders_lr = [decoders_lr]
+        self.encoder_optim = adabelief_optimizer(self.encoder,
+                                                 learning_rate=encoder_lr)
+        if len(self.decoder) > 0:
+            self.decoder_optim = [adabelief_optimizer(self.decoder[i],
+                                                      learning_rate=decoder_lr)
                                   for i, decoder_lr in enumerate(decoders_lr)]
         else:
             self.decoder_optim = list()
@@ -220,6 +237,14 @@ class AEModel:
 
     def compute_reconstruction_loss(self, obs, decoder_latent_lambda):
         rec_obs, h = self.reconstruct_obs(obs)
+        if self.n_calls % self.LOG_FREQ == 0:
+            rec_seq = rec_obs[-1]
+            rec_frames = rec_seq.reshape((3, rec_seq.shape[0] // 3, rec_seq.shape[1], rec_seq.shape[2]))
+            img_grid = torchvision.utils.make_grid(rec_frames + 0.5)
+            summary_image(f"Agent/reconstruction", img_grid)
+            obs_frames = obs[-1].reshape((3, obs[-1].shape[0] // 3, obs[-1].shape[1], obs[-1].shape[2]))
+            obs_grid = torchvision.utils.make_grid(obs_frames / 255.)
+            summary_image(f"Agent/observation", obs_grid)
 
         if obs.dim() <= 3:
             obs = (obs + 1) / 2.
@@ -234,6 +259,7 @@ class AEModel:
 
         rloss = rec_loss + decoder_latent_lambda * latent_loss
         summary_scalar(f'Loss/{self.type}/ReconstructionLoss', rloss.item())
+        self.n_calls += 1
         return rloss
 
     def reconstruct_pose(self, obs_vector):

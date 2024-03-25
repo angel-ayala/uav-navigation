@@ -25,6 +25,11 @@ def summary_scalar(tag, value):
     if writer:
         writer.add_scalar(tag, value, step)
 
+def summary_image(tag, value):
+    global writer, step
+    if writer:
+        writer.add_image(tag, value, step)
+
 def summary_step(step_val):
     global step
     step = step_val

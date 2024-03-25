@@ -45,8 +45,8 @@ class QFunction:
         self.q_network = q_app_fn(**q_app_params).to(self.device)
         self.target_q_network = q_app_fn(**q_app_params).to(self.device)
 
-        # Initialize target network with Q-network parameters
-        self.update_target_network()
+        # Initialize target network with same Q-network parameters
+        self.target_q_network.load_state_dict(self.q_network.state_dict())
 
         # optimization function
         self.loss_fn = nn.SmoothL1Loss(reduction='none')
@@ -61,10 +61,19 @@ class QFunction:
                            target_net=self.target_q_network,
                            tau=self.tau)
 
+    def format_obs(self, obs, augment=False):
+        observation = obs2tensor(obs)
+
+        if len(observation.shape) == 3:
+            observation = observation.unsqueeze(0)
+        if len(observation.shape) == 1:
+            observation = observation.unsqueeze(0)
+
+        return observation.to(self.device)
+
     def compute_q(self, observations, actions=None):
         # Compute Q-values using the Q-network
-        obs_tensor = obs2tensor(observations)
-        q_values = self.q_network(obs_tensor.to(self.device))
+        q_values = self.q_network(observations)
         if actions is not None:
             actions_argmax = actions.argmax(-1)
             return q_values.gather(
@@ -74,8 +83,7 @@ class QFunction:
 
     def compute_q_target(self, observations, actions=None):
         # Compute Q-values using the target Q-network
-        obs_tensor = obs2tensor(observations)
-        q_values = self.target_q_network(obs_tensor.to(self.device))
+        q_values = self.target_q_network(observations)
         if actions is not None:
             actions_argmax = actions.argmax(-1)
             return q_values.gather(
@@ -85,6 +93,7 @@ class QFunction:
 
     def compute_ddqn_target(self, rewards, q_values, next_observations, discount_factor, dones):
         with torch.no_grad():
+            next_observations = self.format_obs(next_observations)
             next_q_values = self.compute_q(next_observations)
             double_q_values = self.compute_q_target(next_observations,
                                                     next_q_values)
@@ -153,7 +162,8 @@ class DDQNAgent:
             return np.random.randint(self.action_shape)  # Explore
         else:
             with torch.no_grad():
-                q_values = self.approximator.compute_q(state).cpu().numpy()
+                observation = self.approximator.format_obs(state)
+                q_values = self.approximator.compute_q(observation).cpu().numpy()
             return np.argmax(q_values)  # Exploit
 
     def update_epsilon(self, n_step):

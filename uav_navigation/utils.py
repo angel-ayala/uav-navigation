@@ -71,12 +71,10 @@ def do_step(agent, env, state, callback=None, must_remember=True):
 
 
 def obs2tensor(observations):
-    if type(observations) is not torch.Tensor:
-        obs_tensor = torch.tensor(np.array(observations),
-                                  dtype=torch.float32).unsqueeze(0)
+    if torch.is_tensor(observations):
+        return observations
     else:
-        obs_tensor = observations
-    return obs_tensor
+        return torch.tensor(np.array(observations), dtype=torch.float32)
 
 
 def run_agent(agent, env, training_steps, mem_steps, train_frequency,

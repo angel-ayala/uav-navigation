@@ -10,13 +10,11 @@ https://arxiv.org/abs/1910.01741
 """
 import torch
 from torchvision.transforms import AutoAugment
-import numpy as np
 from thop import clever_format
 from uav_navigation.agent import QFunction
 from uav_navigation.agent import DDQNAgent
 from uav_navigation.agent import profile_q_approximator
 from uav_navigation.logger import summary_scalar
-from webots_drone.envs.preprocessor import normalize_pixels
 from .net import weight_init
 from .net import PriorModel
 from .net import NorthBelief
@@ -70,7 +68,7 @@ class SRLFunction(QFunction):
                            decoder_weight_decay):
         ae_model.to(self.device)
         ae_model.apply(weight_init)
-        ae_model.sgd_optimizer(encoder_lr, decoder_lr, decoder_weight_decay)
+        ae_model.adabelief_optimizer(encoder_lr, decoder_lr, decoder_weight_decay)
         self.models.append(ae_model)
 
     def append_prior(self, belief_model, learning_rate=1e-3):
@@ -111,6 +109,26 @@ class SRLFunction(QFunction):
                 ae_model, m_params['encoder_lr'], m_params['decoder_lr'],
                 m_params['decoder_weight_decay'])
 
+    def format_obs(self, obs, augment=False):
+        if self.is_multimodal:
+            obs_2d = obs[0]
+            obs_1d = obs[1]
+        else:
+            obs_2d = obs
+            obs_1d = obs
+
+        obs_2d = super().format_obs(obs_2d)
+        obs_1d = super().format_obs(obs_1d)
+
+        # augment pixel values
+        if augment:
+            orig_shape = obs_2d.shape
+            obs_frames = obs_2d.reshape((obs_2d.shape[0] * 3, 3, obs_2d.shape[-2], obs_2d.shape[-1]))
+            obs_2d = torch.cat([self.augment_model(frame.to(torch.uint8)) for frame in obs_frames])
+            obs_2d = obs_2d.reshape(orig_shape).to(torch.float32)
+
+        return obs_2d.to(self.device), obs_1d.to(self.device)
+
     def compute_z(self, observations, latent_types=None):
         z_hat = list()
         obs_2d, obs_1d = self.format_obs(observations)
@@ -125,30 +143,6 @@ class SRLFunction(QFunction):
 
         z_hat = torch.cat(z_hat, dim=1)
         return z_hat
-
-    def format_obs(self, obs, augment=False):
-        if self.is_multimodal:
-            obs_2d = obs[0]
-            obs_1d = obs[1]
-        else:
-            obs_2d = obs
-            obs_1d = obs
-
-        if not torch.is_tensor(obs_2d):
-            obs_2d = np.array(obs_2d)
-            if augment:
-                obs_2d = self.augment_model(obs_2d)
-            obs_2d = normalize_pixels(obs_2d)
-            obs_2d = torch.tensor(obs_2d, dtype=torch.float32)
-        if not torch.is_tensor(obs_1d):
-            obs_1d = np.array(obs_1d)
-            obs_1d = torch.tensor(obs_1d, dtype=torch.float32)
-
-        if len(obs_2d.shape) == 3:
-            obs_2d = obs_2d.unsqueeze(0)
-        if len(obs_1d.shape) == 1:
-            obs_1d = obs_1d.unsqueeze(0)
-        return obs_2d.to(self.device), obs_1d.to(self.device)
 
     def compute_q(self, observations, actions=None):
         # Compute Q-values using the inferenced z latent representation
@@ -286,7 +280,7 @@ class SRLDDQNAgent(DDQNAgent):
     def init_priors(self):
         self.approximator.append_prior(NorthBelief(self.state_shape[1], 50))
         self.approximator.append_prior(OrientationBelief(self.state_shape[1], 50), learning_rate=1e-4)
-        self.approximator.append_prior(PositionBelief(self.state_shape[1], 50), learning_rate=1e-4)
+        self.approximator.append_prior(PositionBelief(self.state_shape[1], 50))
 
     def update_representation(self, obs, actions, rewards, obs_t1):
         obs_2d, obs_1d = self.approximator.format_obs(obs, augment=True)

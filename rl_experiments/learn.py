@@ -114,9 +114,9 @@ def parse_args():
                          help='Number of filters in the CNN hidden layers.')
     arg_srl.add_argument("--num-layers", type=int, default=2,
                          help='Number of hidden layers.')
-    arg_srl.add_argument("--encoder-lr", type=float, default=1e-4,
+    arg_srl.add_argument("--encoder-lr", type=float, default=1e-3,
                          help='Encoder function SGD learning rate.')
-    arg_srl.add_argument("--decoder-lr", type=float, default=1e-4,
+    arg_srl.add_argument("--decoder-lr", type=float, default=1e-3,
                          help='Decoder function SGD learning rate.')
     arg_srl.add_argument("--decoder-latent-lambda", type=float, default=1e-6,
                          help='Decoder regularization \lambda value.')
