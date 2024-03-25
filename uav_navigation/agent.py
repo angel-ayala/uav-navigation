@@ -61,12 +61,12 @@ class QFunction:
                            target_net=self.target_q_network,
                            tau=self.tau)
 
-    def format_obs(self, obs, augment=False):
+    def format_obs(self, obs, is_pixels=True):
         observation = obs2tensor(obs)
 
-        if len(observation.shape) == 3:
+        if len(observation.shape) == 3 and is_pixels:
             observation = observation.unsqueeze(0)
-        if len(observation.shape) == 1:
+        if len(observation.shape) == 1 and not is_pixels:
             observation = observation.unsqueeze(0)
 
         return observation.to(self.device)

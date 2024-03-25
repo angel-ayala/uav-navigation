@@ -117,8 +117,8 @@ class SRLFunction(QFunction):
             obs_2d = obs
             obs_1d = obs
 
-        obs_2d = super().format_obs(obs_2d)
-        obs_1d = super().format_obs(obs_1d)
+        obs_2d = super().format_obs(obs_2d, is_pixels=True)
+        obs_1d = super().format_obs(obs_1d, is_pixels=False)
 
         # augment pixel values
         if augment:
@@ -293,7 +293,6 @@ class SRLDDQNAgent(DDQNAgent):
                 loss = ae_model.compute_reconstruction_loss(obs_2d, self.approximator.decoder_latent_lambda)
                 total_loss.append(loss)
                 if self.srl_loss:
-                    # srl_loss.append(ae_model.compute_srl_loss(obs_2d, obs_2d_t1, actions))
                     srl_loss.append(ae_model.compute_state_priors(obs_2d, actions, rewards, obs_2d_t1))
             if ae_model.type in ["vector"]:
                 loss = ae_model.compute_reconstruction_loss(obs_1d, self.approximator.decoder_latent_lambda)
