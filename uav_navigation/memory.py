@@ -45,6 +45,10 @@ class ReplayBuffer:
     def sample(self, batch_size, device=None):
         indices = np.random.choice(self.size, batch_size, replace=False)
         return self.get_indices(indices, device=device)
+    
+    def last_n(self, n, device=None):
+        indices = [self.index - i for i in range(n)]
+        return self.get_indices(indices, device=device)
 
     def get_indices(self, indices, device=None):
 
@@ -272,6 +276,27 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         # We are at the leaf node. Subtract the capacity by the index in the tree
         # to get the index of actual value
         return idx - self.buffer_size
+
+    def random_sample(self, batch_size, device=None):
+        # Initialize samples
+        samples = {
+            'weights': np.zeros(shape=batch_size, dtype=np.float32),
+            'indexes': np.zeros(shape=batch_size, dtype=np.int32)
+        }
+        if device is None:
+            return super().sample(batch_size, device), samples
+        else:
+            samples['weights'] = torch.tensor(samples['weights'],
+                                              dtype=torch.float32).to(device)
+            return super().sample(batch_size, device), samples
+
+    def last_n(self, n, device=None):
+        indices = [self.index - i for i in range(n)]
+        samples = {
+            'weights': np.zeros(shape=n, dtype=np.float32),
+            'indexes': np.zeros(shape=n, dtype=np.int32)
+        }
+        return self.get_indices(indices, device=device), samples
 
     def sample(self, batch_size, device=None):
         # Initialize samples

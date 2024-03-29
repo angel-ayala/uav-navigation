@@ -140,6 +140,8 @@ def parse_args():
                               help='Number of steps for initial population of the Experience replay buffer.')
     arg_training.add_argument("--train-frequency", type=int, default=4,
                               help='Steps interval for Q-network batch training.')
+    arg_training.add_argument("--reconstruct-frequency", type=int, default=1,
+                              help='Steps interval for AE batch training.')
     arg_training.add_argument("--target-update-frequency", type=int, default=1500,  # 5m at 25 frames
                               help='Steps interval for target network update.')
     arg_training.add_argument('--eval-interval', type=int, default=9000,  # 30m at 25 frames
@@ -326,6 +328,7 @@ if __name__ == '__main__':
         mem_steps=args.memory_steps,
         train_frequency=args.train_frequency,
         target_update_steps=args.target_update_frequency,
+        reconstruct_frequency=args.reconstruct_frequency,
         eval_interval=args.eval_interval,
         eval_epsilon=args.eval_epsilon,
         eval_steps=args.eval_steps,

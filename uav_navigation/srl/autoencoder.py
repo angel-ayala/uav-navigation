@@ -24,6 +24,8 @@ from .net import variability_cost
 from .net import proportionality_cost
 from .net import repeatability_cost
 from .net import adabelief_optimizer
+from .net import MS_SSIM_Loss, SSIM_Loss
+from .net import logarithmic_difference_loss
 from .net import BiGRU
 
 
@@ -76,6 +78,8 @@ class AEModel:
         elif type(self.decoder) is not tuple:
             self.decoder = [self.decoder]
         self.n_calls = 0
+        self.ssim_loss = SSIM_Loss(data_range=1.0, size_average=True, channel=3, nonnegative_ssim=True)
+        self.ms_ssim_loss = MS_SSIM_Loss(data_range=1.0, size_average=True, channel=3)
 
     def adam_optimizer(self, encoder_lr, decoders_lr, decoder_weight_decay):
         if type(decoders_lr) is not list:
@@ -154,29 +158,29 @@ class AEModel:
         for dec in self.decoder:
             dec.apply(function)
 
-    def encoder_slowness(self, h_t, h_t1):
-        # Compute slowness cost
-        slowness_loss = slowness_cost(h_t, h_t1)
-        summary_scalar(f'Loss/{self.type}/Encoder/Slowness', slowness_loss.item())
-        return slowness_loss
+    # def encoder_slowness(self, h_t, h_t1):
+    #     # Compute slowness cost
+    #     slowness_loss = slowness_cost(h_t, h_t1)
+    #     summary_scalar(f'Loss/{self.type}/Encoder/Slowness', slowness_loss.item())
+    #     return slowness_loss
 
-    def encoder_variability(self, h_t, h_t1):
-        # Compute slowness cost
-        variability_loss = variability_cost(h_t, h_t1)
-        summary_scalar(f'Loss/{self.type}/Encoder/Variability', variability_loss.item())
-        return variability_loss
+    # def encoder_variability(self, h_t, h_t1):
+    #     # Compute slowness cost
+    #     variability_loss = variability_cost(h_t, h_t1)
+    #     summary_scalar(f'Loss/{self.type}/Encoder/Variability', variability_loss.item())
+    #     return variability_loss
 
-    def encoder_proportionality(self, h_t, h_t1, actions):
-        # Compute slowness cost
-        proportionality_loss = proportionality_cost(h_t, h_t1, actions)
-        summary_scalar(f'Loss/{self.type}/Encoder/Proportionality', proportionality_loss.item())
-        return proportionality_loss
+    # def encoder_proportionality(self, h_t, h_t1, actions):
+    #     # Compute slowness cost
+    #     proportionality_loss = proportionality_cost(h_t, h_t1, actions)
+    #     summary_scalar(f'Loss/{self.type}/Encoder/Proportionality', proportionality_loss.item())
+    #     return proportionality_loss
 
-    def encoder_repeatability(self, h_t, h_t1, actions):
-        # Compute slowness cost
-        repeatability_loss = repeatability_cost(h_t, h_t1, actions)
-        summary_scalar(f'Loss/{self.type}/Encoder/Repeatibility', repeatability_loss.item())
-        return repeatability_loss
+    # def encoder_repeatability(self, h_t, h_t1, actions):
+    #     # Compute slowness cost
+    #     repeatability_loss = repeatability_cost(h_t, h_t1, actions)
+    #     summary_scalar(f'Loss/{self.type}/Encoder/Repeatibility', repeatability_loss.item())
+    #     return repeatability_loss
 
     def compute_state_priors(self, obs_t, actions, rewards, obs_t1):
         actions_argmax = actions.argmax(-1)
@@ -222,21 +226,21 @@ class AEModel:
         summary_scalar(f'Loss/{self.type}/Encoder/S+V+P+R', state_priors_loss.item())
         return state_priors_loss
 
-    def compute_srl_loss(self, obs_t, obs_t1, actions):
-        actions_argmax = actions.argmax(-1)
-        h_t = self(obs_t)
-        h_t1 = self(obs_t1)
+    # def compute_srl_loss(self, obs_t, obs_t1, actions):
+    #     actions_argmax = actions.argmax(-1)
+    #     h_t = self(obs_t)
+    #     h_t1 = self(obs_t1)
 
-        srl_loss = self.encoder_slowness(h_t, h_t1)
-        # srl_loss += self.encoder_variability(h_t, h_t1)
-        # srl_loss += self.encoder_proportionality(h_t, h_t1, actions_argmax)
-        # srl_loss += self.encoder_repeatability(h_t, h_t1, actions_argmax)
-        # enc_loss *= 1e-3
-        summary_scalar(f'Loss/{self.type}/Encoder/S+V+P+R', srl_loss.item())
-        return srl_loss
+    #     srl_loss = self.encoder_slowness(h_t, h_t1)
+    #     # srl_loss += self.encoder_variability(h_t, h_t1)
+    #     # srl_loss += self.encoder_proportionality(h_t, h_t1, actions_argmax)
+    #     # srl_loss += self.encoder_repeatability(h_t, h_t1, actions_argmax)
+    #     # enc_loss *= 1e-3
+    #     summary_scalar(f'Loss/{self.type}/Encoder/S+V+P+R', srl_loss.item())
+    #     return srl_loss
 
-    def compute_reconstruction_loss(self, obs, decoder_latent_lambda):
-        rec_obs, h = self.reconstruct_obs(obs)
+    def compute_reconstruction_loss(self, obs, obs_augm, decoder_latent_lambda):
+        rec_obs, h = self.reconstruct_obs(obs_augm)
         if self.n_calls % self.LOG_FREQ == 0:
             rec_seq = rec_obs[-1]
             rec_frames = rec_seq.reshape((3, rec_seq.shape[0] // 3, rec_seq.shape[1], rec_seq.shape[2]))
@@ -245,20 +249,33 @@ class AEModel:
             obs_frames = obs[-1].reshape((3, obs[-1].shape[0] // 3, obs[-1].shape[1], obs[-1].shape[2]))
             obs_grid = torchvision.utils.make_grid(obs_frames / 255.)
             summary_image(f"Agent/observation", obs_grid)
+            obs_frames = obs_augm[-1].reshape((3, obs[-1].shape[0] // 3, obs[-1].shape[1], obs[-1].shape[2]))
+            obs_grid = torchvision.utils.make_grid(obs_frames / 255.)
+            summary_image(f"Agent/observation_augm", obs_grid)
 
         if obs.dim() <= 3:
             obs = (obs + 1) / 2.
         # preprocess images to be in [-0.5, 0.5] range
         target_obs = preprocess_obs(obs)
-        rec_loss = F.mse_loss(target_obs, rec_obs)
-
+        rec_obs = rec_obs.reshape(rec_obs.shape[0]*3, 3, rec_obs.shape[-2], rec_obs.shape[-1])
+        target_obs = target_obs.reshape(target_obs.shape[0]*3, 3, target_obs.shape[-2], target_obs.shape[-1])
+        rec_loss = F.mse_loss(rec_obs, target_obs)
+        # rec_loss = F.smooth_l1_loss(rec_obs + 0.5, target_obs + 0.5, beta=0.1)  # good choice
+        summary_scalar(f'Loss/{self.type}/ReconstructionLoss', rec_loss.item())
+        log_diff_loss = logarithmic_difference_loss(rec_obs + 0.5, target_obs + 0.5, gamma=0.2)
+        summary_scalar(f'Loss/{self.type}/LogDiff', log_diff_loss.item())
+        rec_loss += log_diff_loss# * 1e-7 # 0.000001
+        ssim_loss = self.ssim_loss(rec_obs + 0.5, target_obs + 0.5)
+        summary_scalar(f'Loss/{self.type}/SSIM', ssim_loss.item())
+        rec_loss += ssim_loss# * 1e-6  # 0.00001
+        
         # add L2 penalty on latent representation
         # see https://arxiv.org/pdf/1903.12436.pdf
         latent_loss = (0.5 * h.pow(2).sum(1)).mean()
         summary_scalar(f'Loss/{self.type}/EncoderActivationL2', latent_loss.item())
 
         rloss = rec_loss + decoder_latent_lambda * latent_loss
-        summary_scalar(f'Loss/{self.type}/ReconstructionLoss', rloss.item())
+        summary_scalar(f'Loss/{self.type}/EncoderDecoderLoss', rloss.item())
         self.n_calls += 1
         return rloss
 

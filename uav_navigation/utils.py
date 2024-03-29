@@ -79,7 +79,7 @@ def obs2tensor(observations):
 
 def run_agent(agent, env, training_steps, mem_steps, train_frequency,
               target_update_steps, eval_interval, eval_epsilon, eval_steps,
-              outpath, step_callback=None):
+              outpath, step_callback=None, reconstruct_frequency=1):
     summary_create(outpath / 'logs')
     ended = True
     total_reward = 0
@@ -121,6 +121,9 @@ def run_agent(agent, env, training_steps, mem_steps, train_frequency,
 
         action, reward, next_state, ended = do_step(
             agent, env, state, step_callback, must_remember=True)
+
+        if step % reconstruct_frequency == 0:
+            agent.update_representation()
 
         if step % train_frequency == 0:
             agent.update()

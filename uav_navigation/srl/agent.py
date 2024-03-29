@@ -10,6 +10,7 @@ https://arxiv.org/abs/1910.01741
 """
 import torch
 from torchvision.transforms import AutoAugment
+# from torchvision.transforms import AugMix
 from thop import clever_format
 from uav_navigation.agent import QFunction
 from uav_navigation.agent import DDQNAgent
@@ -61,6 +62,7 @@ class SRLFunction(QFunction):
         self.decoder_latent_lambda = decoder_latent_lambda
         self.is_multimodal = is_multimodal
         self.augment_model = AutoAugment()
+        # self.augment_model = AugMix()
 
     def append_autoencoder(self, ae_model,
                            encoder_lr,
@@ -282,20 +284,27 @@ class SRLDDQNAgent(DDQNAgent):
         self.approximator.append_prior(OrientationBelief(self.state_shape[1], 50), learning_rate=1e-4)
         self.approximator.append_prior(PositionBelief(self.state_shape[1], 50))
 
-    def update_representation(self, obs, actions, rewards, obs_t1):
-        obs_2d, obs_1d = self.approximator.format_obs(obs, augment=True)
-        obs_2d_t1, obs_1d_t1 = self.approximator.format_obs(obs_t1, augment=True)
+    def compute_reconstruction_loss(self, sampled_data):
+        obs = sampled_data[0][0] if self.is_prioritized else sampled_data[0]
+        actions = sampled_data[0][1] if self.is_prioritized else sampled_data[1]
+        rewards = sampled_data[0][2] if self.is_prioritized else sampled_data[2]
+        obs_t1 = sampled_data[0][3] if self.is_prioritized else sampled_data[3]
+
+        obs_2d, obs_1d = self.approximator.format_obs(obs, augment=False)
+        obs_2d_t1, obs_1d_t1 = self.approximator.format_obs(obs_t1, augment=False)
+        obs_2d_augm, _ = self.approximator.format_obs(obs, augment=True)
 
         total_loss = list()
         srl_loss = list()
         for ae_model in self.approximator.models:
             if ae_model.type in ["rgb"]:
-                loss = ae_model.compute_reconstruction_loss(obs_2d, self.approximator.decoder_latent_lambda)
-                total_loss.append(loss)
+                total_loss.append(
+                    ae_model.compute_reconstruction_loss(
+                        obs_2d, obs_2d_augm, self.approximator.decoder_latent_lambda))
                 if self.srl_loss:
                     srl_loss.append(ae_model.compute_state_priors(obs_2d, actions, rewards, obs_2d_t1))
             if ae_model.type in ["vector"]:
-                loss = ae_model.compute_reconstruction_loss(obs_1d, self.approximator.decoder_latent_lambda)
+                loss = ae_model.compute_reconstruction_loss(obs_1d, obs_1d, self.approximator.decoder_latent_lambda)
                 total_loss.append(loss)
                 if self.srl_loss:
                     srl_loss.append(ae_model.compute_state_priors(obs_1d, actions, rewards, obs_1d_t1))
@@ -308,21 +317,14 @@ class SRLDDQNAgent(DDQNAgent):
             tloss += torch.mean(torch.stack(srl_loss)) * 0.1  # \times lambda
 
         summary_scalar("Loss/Representation/TotalLoss", tloss.item())
-        self.approximator.update_representation(tloss)
+        return tloss
 
-    def update(self):
-        # Update the Q-network if replay buffer is sufficiently large
+    def update_representation(self):
+        # Update the autoencoder models if replay buffer is sufficiently large
         if len(self.memory) >= self.BATCH_SIZE:
-            sampled_data = self.memory.sample(
-                self.BATCH_SIZE, device=self.approximator.device)
-            td_loss = self.compute_td_loss(sampled_data)
-            self.approximator.update(td_loss)
-            # update the autoencoder
-            obs_data = sampled_data[0][0] if self.is_prioritized else sampled_data[0]
-            actions_data = sampled_data[0][1] if self.is_prioritized else sampled_data[1]
-            rewards_data = sampled_data[0][2] if self.is_prioritized else sampled_data[2]
-            obs_data_t1 = sampled_data[0][3] if self.is_prioritized else sampled_data[3]
-            self.update_representation(obs_data, actions_data, rewards_data, obs_data_t1)
+            sampled_data = self.memory.random_sample(self.BATCH_SIZE, device=self.approximator.device)
+            rec_loss = self.compute_reconstruction_loss(sampled_data)
+            self.approximator.update_representation(rec_loss)
 
     def save(self, path, encoder_only=False):
         self.approximator.save(path, ae_models=self.ae_models)

@@ -14,6 +14,8 @@ from torch import nn
 from torch import optim
 from torch.nn import functional as F
 from adabelief_pytorch import AdaBelief
+from pytorch_msssim import MS_SSIM
+from pytorch_msssim import SSIM
 
 
 OUT_DIM = {2: 39, 4: 35, 6: 31}
@@ -249,27 +251,48 @@ def angular_loss(orientation, orientation_true):
 def circular_difference(predicted_angles, real_angles):
     """
     Calculates the circular difference between predicted and real angles in a batch.
-    
+
     Args:
       predicted_angles: A PyTorch tensor of shape (batch_size, 3) containing predicted angles in radians.
       real_angles: A PyTorch tensor of shape (batch_size, 3) containing real angles in radians.
-    
+
     Returns:
       A PyTorch tensor of shape (batch_size) containing the circular difference for each batch element.
     """
-    
+
     # No conversion needed since angles are already in radians
-    
+
     # Calculate absolute difference considering rotations
     diff = torch.abs(predicted_angles - real_angles)
     wrapped_diff1 = torch.abs(predicted_angles + torch.tensor(2*torch.pi) - real_angles)
     wrapped_diff2 = torch.abs(predicted_angles - real_angles - torch.tensor(2*torch.pi))
-    
+
     # Find minimum difference among original and wrapped values
     min_diffs = torch.min(torch.stack([diff, wrapped_diff1, wrapped_diff2]), dim=0)[0]  # Find minimum along first dimension
     circular_diff = torch.min(min_diffs, dim=1).values  # Find minimum along second dimension
 
     return circular_diff
+
+
+class MS_SSIM_Loss(MS_SSIM):
+    def forward(self, img1, img2):
+        return 100*( 1 - super(MS_SSIM_Loss, self).forward(img1, img2) )
+
+class SSIM_Loss(SSIM):
+    def forward(self, img1, img2):
+        return 1 - super(SSIM_Loss, self).forward(img1, img2)
+
+
+def logarithmic_difference_loss(predicted, ground_truth, gamma=1.0):
+    # Ensure non-zero predictions and targets to avoid NaNs in logarithms
+    eps = 1e-8
+    predicted = torch.clamp(predicted, min=eps, max=float('inf'))
+    ground_truth = torch.clamp(ground_truth, min=eps, max=float('inf'))
+
+    # Calculate the loss
+    log_diff = torch.abs(torch.log(ground_truth) - torch.log(predicted))
+    loss = torch.mean(torch.exp(gamma * log_diff))
+    return loss
 
 
 class MLP(nn.Module):
@@ -392,14 +415,14 @@ class PriorModel:
 
     def compute_loss(self, values_pred, values_true):
         return self.model.compute_loss(values_pred, values_true)
-    
+
     def optimizer_zero_grad(self):
         self.optimizer.zero_grad()
 
     def optimizer_step(self):
         self.optimizer.step()
         self.avg_model.update_parameters(self.model)
-    
+
     def __call__(self, x):
         return self.model(x)
 
@@ -481,6 +504,26 @@ class OdometryBelief(VectorDecoder):
         return obs[..., :13]
 
 
+class ChannelAttention(nn.Module):
+    def __init__(self, num_filters, reduction_ratio=8):
+        super(ChannelAttention, self).__init__()
+        self.avg_pool = nn.AdaptiveAvgPool2d(output_size=(1, 1))
+        self.fc = nn.Sequential(
+            nn.Conv2d(num_filters, num_filters // reduction_ratio, 1),
+            nn.ReLU(inplace=False),
+            nn.ConvTranspose2d(num_filters // reduction_ratio, num_filters, 1),
+            nn.Sigmoid()
+        )
+
+    def forward(self, x):
+        # Squeeze operation
+        z = self.avg_pool(x)
+        # Excitation operation
+        z = self.fc(z)
+        # Attention weights
+        attention = torch.mul(x, z)
+        return attention
+
 
 class PixelEncoder(nn.Module):
     """Convolutional encoder of pixels observations."""
@@ -543,21 +586,28 @@ class PixelDecoder(nn.Module):
         self.deconvs = nn.ModuleList()
 
         for i in range(self.num_layers - 1):
-            self.deconvs.append(
+            self.deconvs.extend([
+                # ChannelAttention(num_filters, reduction_ratio=8),
                 nn.ConvTranspose2d(num_filters, num_filters, 3, stride=1)
-            )
-        self.deconvs.append(
+            ])
+        self.deconvs.extend([
+            ChannelAttention(num_filters, reduction_ratio=8),
             nn.ConvTranspose2d(
                 num_filters, state_shape[0], 3, stride=2, output_padding=1
             )
-        )
+        ])
+        self.num_layers = len(self.deconvs)
 
     def forward(self, h):
         h = torch.relu(self.fc(h))
         deconv = h.view(-1, self.num_filters, self.out_dim, self.out_dim)
 
         for i in range(0, self.num_layers - 1):
-            deconv = torch.relu(self.deconvs[i](deconv))
+            if type(self.deconvs[i]) == ChannelAttention:
+                deconv_att = self.deconvs[i](deconv)
+                deconv = torch.mul(deconv, deconv_att)
+            else:
+                deconv = torch.relu(self.deconvs[i](deconv))
 
         obs = self.deconvs[-1](deconv)
 

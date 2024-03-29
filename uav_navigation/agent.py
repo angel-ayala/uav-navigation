@@ -15,6 +15,7 @@ from .utils import soft_update_params
 from .utils import obs2tensor
 from .memory import is_prioritized_memory
 from .logger import summary_scalar
+from .srl.net import adabelief_optimizer
 
 
 def profile_q_approximator(approximator, state_shape, action_shape):
@@ -50,10 +51,12 @@ class QFunction:
 
         # optimization function
         self.loss_fn = nn.SmoothL1Loss(reduction='none')
-        self.optimizer = optim.SGD(self.q_network.parameters(),
-                                   lr=learning_rate,
-                                   momentum=momentum,
-                                   nesterov=True)
+        # self.optimizer = optim.SGD(self.q_network.parameters(),
+        #                             lr=learning_rate,
+        #                             momentum=momentum,
+        #                             nesterov=True)
+        self.optimizer = adabelief_optimizer(self.q_network,
+                                              learning_rate=learning_rate)
 
     def update_target_network(self):
         # Soft update the target network
