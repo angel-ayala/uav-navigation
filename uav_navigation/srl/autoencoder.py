@@ -264,10 +264,10 @@ class AEModel:
         summary_scalar(f'Loss/{self.type}/ReconstructionLoss', rec_loss.item())
         log_diff_loss = logarithmic_difference_loss(rec_obs + 0.5, target_obs + 0.5, gamma=0.2)
         summary_scalar(f'Loss/{self.type}/LogDiff', log_diff_loss.item())
-        rec_loss += log_diff_loss# * 1e-7 # 0.000001
+        rec_loss += log_diff_loss * 1e-6 # 0.000001
         ssim_loss = self.ssim_loss(rec_obs + 0.5, target_obs + 0.5)
         summary_scalar(f'Loss/{self.type}/SSIM', ssim_loss.item())
-        rec_loss += ssim_loss# * 1e-6  # 0.00001
+        rec_loss += ssim_loss * 1e-6  # 0.00001
         
         # add L2 penalty on latent representation
         # see https://arxiv.org/pdf/1903.12436.pdf
