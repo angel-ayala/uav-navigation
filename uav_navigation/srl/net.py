@@ -550,25 +550,44 @@ class PixelEncoder(nn.Module):
         for i in range(1, self.num_layers):
             conv = torch.relu(self.convs[i](conv))
 
-        h = conv.view(conv.size(0), -1)
-        return h
+        return conv
 
     def forward(self, obs, detach=False):
         h = self.forward_conv(obs)
         if detach:
             h = h.detach()
 
+        h = h.view(h.size(0), -1)
         h_fc = self.fc(h)
         h_norm = self.ln(h_fc)
-        out = torch.tanh(h_norm)
+        h = torch.tanh(h_norm)
 
-        return out
+        return h
 
     def copy_conv_weights_from(self, source):
         """Tie convolutional layers"""
         # only tie conv layers
         for i in range(self.num_layers):
             tie_weights(src=source.convs[i], trg=self.convs[i])
+
+
+class PixelMDPEncoder(PixelEncoder):
+    def __init__(self, state_shape, latent_dim, num_layers=2, num_filters=32):
+        super().__init__(state_shape, latent_dim, num_layers, num_filters)
+        self.avg_pool = nn.AdaptiveAvgPool2d(output_size=(1, 1))
+        # self.code_fc = nn.Linear(num_filters, num_filters)
+        self.contrastive = nn.Linear(latent_dim, latent_dim)
+        self.probabilities = nn.Linear(latent_dim, latent_dim)
+
+    def forward_prob(self, obs, detach=False):
+        h = self.forward(obs, detach=detach)
+        h_fc = self.probabilities(h)
+        return h_fc
+
+    def forward_code(self, obs, detach=False):
+        code = self.forward(obs, detach=detach)
+        h_fc = self.contrastive(code) + code
+        return h_fc
 
 
 class PixelDecoder(nn.Module):

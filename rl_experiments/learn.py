@@ -128,6 +128,8 @@ def parse_args():
                          help='Whether if use the Pose reconstruction model.')
     arg_srl.add_argument("--model-vector", action='store_true',
                          help='Whether if use the Vector reconstruction model.')
+    arg_srl.add_argument("--model-atc", action='store_true',
+                         help='Whether if use the Augmented Temporal Contrast model.')
     arg_srl.add_argument("--use-priors", action='store_true',
                          help='Whether if use the Prior models.')
     arg_srl.add_argument("--use-srl-loss", action='store_true',
@@ -242,6 +244,15 @@ if __name__ == '__main__':
         if args.model_rgb:
             image_shape = agent_params['state_shape'][0] if is_multimodal else agent_params['state_shape']
             ae_models['rgb'] = dict(image_shape=image_shape,
+                                    latent_dim=args.latent_dim,
+                                    num_layers=args.num_layers,
+                                    num_filters=args.num_filters,
+                                    encoder_lr=args.encoder_lr,
+                                    decoder_lr=args.decoder_lr,
+                                    decoder_weight_decay=args.decoder_weight_decay)
+        if args.model_atc:
+            image_shape = agent_params['state_shape'][0] if is_multimodal else agent_params['state_shape']
+            ae_models['atc'] = dict(image_shape=image_shape,
                                     latent_dim=args.latent_dim,
                                     num_layers=args.num_layers,
                                     num_filters=args.num_filters,
