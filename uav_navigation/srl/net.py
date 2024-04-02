@@ -574,8 +574,6 @@ class PixelEncoder(nn.Module):
 class PixelMDPEncoder(PixelEncoder):
     def __init__(self, state_shape, latent_dim, num_layers=2, num_filters=32):
         super().__init__(state_shape, latent_dim, num_layers, num_filters)
-        self.avg_pool = nn.AdaptiveAvgPool2d(output_size=(1, 1))
-        # self.code_fc = nn.Linear(num_filters, num_filters)
         self.contrastive = nn.Linear(latent_dim, latent_dim)
         self.probabilities = nn.Linear(latent_dim, latent_dim)
 

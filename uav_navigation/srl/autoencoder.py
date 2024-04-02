@@ -218,7 +218,7 @@ class AEModel:
         rec_obs = rec_obs.reshape((rec_obs.shape[0] * 3, 3, rec_obs.shape[-2], rec_obs.shape[-1]))
         rec_obs = torch.clip(rec_obs, -1, 1) * 0.5
 
-        rec_loss = F.mse_loss(rec_obs, target_obs)
+        rec_loss = F.mse_loss(rec_obs, target_obs) * 10
         summary_scalar(f'Loss/Reconstruction/{self.type}/MSE', rec_loss.item())
         bce_loss = F.binary_cross_entropy(rec_obs + 0.5, target_obs + 0.5)
         summary_scalar(f'Loss/Reconstruction/{self.type}/BCE', bce_loss.item())
@@ -241,54 +241,6 @@ class AEModel:
         summary_scalar(f'Loss/Reconstruction/{self.type}', rloss.item())
         self.n_calls += 1
         return rloss
-
-    def reconstruct_pose(self, obs_vector):
-        h = self.encoder(obs_vector[:, :6])  # attitude (IMU + Gyro) data only
-        rec_att = self.decoder[0](h)
-        rec_pos = self.decoder[1](h)
-        return rec_att, rec_pos, h
-
-    def optimize_pose(self, obs_vector, decoder_latent_lambda):
-        rec_att, rec_pos, h = self.reconstruct_pose(obs_vector)
-
-        if obs_vector.dim() == 2:
-            # preprocess images to be in [-0.5, 0.5] range
-            target_obs = preprocess_obs(obs_vector)
-            target_att, target_pos = target_obs[:, :6], target_obs[:, 6:12]
-
-        # add L2 penalty on latent representation
-        # see https://arxiv.org/pdf/1903.12436.pdf
-        latent_loss = (0.5 * h.pow(2).sum(1)).mean()
-        summary_scalar(f'Loss/{self.type}/EncoderActivation', latent_loss.item())
-
-        # inertial gradients
-        att_loss = F.mse_loss(target_att, rec_att)
-        summary_scalar(f'Loss/{self.type}/AttitudeDecoder', att_loss.item())
-
-        r_att_loss = att_loss + decoder_latent_lambda * latent_loss
-        summary_scalar(f'Loss/{self.type}/AttitudeReconstruction', r_att_loss.item())
-
-        # position gradients
-        pos_loss = F.mse_loss(target_pos, rec_pos)
-        summary_scalar(f'Loss/{self.type}/PositionDecoder', pos_loss.item())
-
-        r_pos_loss = pos_loss + decoder_latent_lambda * latent_loss
-        summary_scalar(f'Loss/{self.type}/PositionReconstruction', r_pos_loss.item())
-
-        # encoder optimizer
-        self.encoder_optim.zero_grad()
-        # decoder optimizer
-        self.decoder_optim[0].zero_grad()
-        self.decoder_optim[1].zero_grad()
-
-        r_att_loss.backward(retain_graph=True)
-        r_pos_loss.backward()
-
-        self.encoder_optim.step()
-        self.decoder_optim[0].step()
-        self.decoder_optim[1].step()
-
-        return r_att_loss, r_pos_loss
 
 
 class RGBModel(AEModel):
@@ -322,8 +274,7 @@ class ATCModel(AEModel):
         self.momentum_encoder = PixelMDPEncoder(
             model_params['image_shape'], model_params['latent_dim'],
             num_layers=model_params['num_layers'], num_filters=model_params['num_filters'])
-        encoder_state = self.encoder[0].state_dict()
-        self.momentum_encoder.load_state_dict(encoder_state, strict=False)
+        self.momentum_encoder.load_state_dict(self.encoder[0].state_dict())
         self.loss = InfoNCE()
         self.avg_encoder = optim.swa_utils.AveragedModel(self.encoder[0])
 
@@ -336,19 +287,23 @@ class ATCModel(AEModel):
         soft_update_params(net=self.encoder[0],
                            target_net=self.momentum_encoder,
                            tau=tau)
+    def to(self, device):
+        super().to(device)
+        self.momentum_encoder.to(device)
 
     def compute_contrastive_loss(self, obs_augm, obs_t1_augm):
-        """Compute ATC loss function.
+        """Compute Augmented Temporal Contrast loss function.
 
         based on https://arxiv.org/pdf/2009.08319.pdf
         """
         z_t = self.encoder[0].forward_code(obs_augm / 255.)  # query
         z_t1 = self.momentum_encoder(obs_t1_augm / 255.)  # positive keys
+        # TODO: positive keys from positive rewards and viceversa
         nceloss = self.loss(z_t, z_t1)
         summary_scalar(f'Loss/Contrastive/{self.type}/InfoNCE', nceloss.item())
-        return nceloss #* 1e-3
+        return nceloss * 1e-3
 
-    def compute_compression_loss(self, obs, obs_t1):
+    def compute_compression_loss(self, obs, obs_t1, temperature=1):
         """Compute compression loss.
 
         based on https://arxiv.org/pdf/2106.01655.pdf
@@ -356,33 +311,40 @@ class ATCModel(AEModel):
         # z_t = self.encoder[0](obs)
         # z_t1 = self.momentum_encoder(obs_t1)
         z_t = self.encoder[0].forward_prob(obs / 255.)
-        z_t1 = self.momentum_encoder(obs_t1 / 255.)
+        z_t1 = self.momentum_encoder.forward_prob(obs_t1 / 255.)
         # z_t_norm = (z_t + 1.) / 2.
         # z_t1_norm = (z_t1 + 1.) / 2.
-        z_t_norm = F.softmax(z_t, dim=0)
-        z_t1_norm = F.softmax(z_t1, dim=0)
+        # z_t_norm = F.softmax(z_t, dim=1)
+        # z_t1_norm = F.softmax(z_t1, dim=1)
+        z_t_norm = torch.clamp(F.softmax(z_t / temperature, dim=-1), 1e-9, 1 - (z_t.shape[0] * 1e-9))
+        z_t1_norm = torch.clamp(F.softmax(z_t1 / temperature, dim=-1), 1e-9, 1 - (z_t1.shape[0] * 1e-9))
         # z_t1_norm = z_t1
         # print('z_t', z_t.shape, z_t_norm.max(), z_t_norm.min())
-        # print('z_t1', z_t1_norm.max(), z_t1_norm.min())
+        # print('z_t_norm', z_t_norm.shape, z_t_norm.max(), z_t_norm.min())
+        # print('z_t1', z_t1_norm.shape, z_t1_norm.max(), z_t1_norm.min())
         # transition term
         # ce_loss = -torch.sum(torch.mul(z_t_norm, torch.log(z_t1_norm + 1e-8)), dim=0)
-        ce_loss = -torch.sum(z_t_norm * torch.log(z_t1_norm + 1e-8))
+        # ce_loss = -torch.sum(z_t_norm * torch.log(z_t1_norm + 1e-8))
+        ce_loss = torch.sum(z_t_norm * torch.log(z_t1_norm + 1e-8), dim=1)
+        ce_loss = -ce_loss.mean(dim=0)
+        # print('ce_loss', ce_loss.shape, ce_loss.max(), ce_loss.min())
         # ce_loss = ce_loss.sum(dim=0)
         summary_scalar(f'Loss/Compression/{self.type}/CE', ce_loss.item())
         # transition entropy term
-        avg_prob = z_t_norm.mean(dim=1)
+        avg_prob = z_t_norm.mean(dim=0)
         # print('avg_prob', avg_prob.shape, avg_prob.max(), avg_prob.min())
         # transition_loss = -torch.sum(torch.mul(avg_prob, torch.log(avg_prob)))
-        transition_loss = -torch.sum(avg_prob * torch.log(avg_prob + 1e-8))
+        transition_loss = torch.sum(avg_prob * torch.log(avg_prob + 1e-8))
+        # print('transition_loss', transition_loss.shape, transition_loss.max(), transition_loss.min())
         summary_scalar(f'Loss/Compression/{self.type}/TCE', transition_loss.item())
         # individual entropy term
         # individual_loss = torch.sum(torch.mul(z_t_norm, torch.log(z_t_norm)), dim=0)
-        individual_loss = torch.sum(z_t_norm * torch.log(z_t_norm + 1e-8), dim=0)
+        individual_loss = torch.sum(z_t_norm * torch.log(z_t_norm + 1e-8), dim=1)
         # print('individual_loss', individual_loss.shape, individual_loss.max(), individual_loss.min())
         individual_loss = -individual_loss.mean()
         summary_scalar(f'Loss/Compression/{self.type}/ICE', individual_loss.item())
 
-        compression_loss = ce_loss + 1 * transition_loss + 1 * individual_loss
+        compression_loss = ce_loss + 0.4 * transition_loss + 0.1 * individual_loss
         summary_scalar(f'Loss/Compression/{self.type}', compression_loss.item())
 
-        return compression_loss #* 1e-3
+        return compression_loss * 1e-3
