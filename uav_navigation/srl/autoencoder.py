@@ -36,15 +36,17 @@ from .net import BiGRU
 
 def profile_ae_model(ae_model, state_shape, device):
     total_flops, total_params = 0, 0
+    feature_dim = 0
     for i, encoder in enumerate(ae_model.encoder):
         flops, params = profile_model(encoder, state_shape, device)
         total_flops += flops
         total_params += params
         print('Encoder {}({}): {} flops, {} params'.format(
             ae_model.type, i, *clever_format([flops, params], "%.3f")))
+        feature_dim += encoder.feature_dim
     # profile decode stage
     for i, decoder in enumerate(ae_model.decoder):
-        flops, params = profile_model(decoder, ae_model.encoder.feature_dim, device)
+        flops, params = profile_model(decoder, feature_dim, device)
         total_flops += flops
         total_params += params
         print('Decoder {} ({}): {} flops, {} params'.format(
@@ -216,13 +218,13 @@ class AEModel:
         target_obs = preprocess_obs(obs)
         target_obs = target_obs.reshape((target_obs.shape[0] * 3, 3, target_obs.shape[-2], target_obs.shape[-1]))
         rec_obs = rec_obs.reshape((rec_obs.shape[0] * 3, 3, rec_obs.shape[-2], rec_obs.shape[-1]))
-        rec_obs = torch.clip(rec_obs, -1, 1) * 0.5
+        # rec_obs = torch.clip(rec_obs, -1, 1) * 0.5
 
-        rec_loss = F.mse_loss(rec_obs, target_obs) * 10
+        rec_loss = F.mse_loss(rec_obs, target_obs) #* 10
         summary_scalar(f'Loss/Reconstruction/{self.type}/MSE', rec_loss.item())
-        bce_loss = F.binary_cross_entropy(rec_obs + 0.5, target_obs + 0.5)
-        summary_scalar(f'Loss/Reconstruction/{self.type}/BCE', bce_loss.item())
-        rec_loss += bce_loss # * 1e-3
+        # bce_loss = F.binary_cross_entropy(rec_obs + 0.5, target_obs + 0.5)
+        # summary_scalar(f'Loss/Reconstruction/{self.type}/BCE', bce_loss.item())
+        # rec_loss += bce_loss # * 1e-3
         # rec_loss = F.smooth_l1_loss(rec_obs + 0.5, target_obs + 0.5, beta=0.1)  # good choice
         # summary_scalar(f'Loss/{self.type}/ReconstructionLoss', rec_loss.item())
         # log_diff_loss = logarithmic_difference_loss(rec_obs + 0.5, target_obs + 0.5, gamma=0.2)
@@ -263,17 +265,19 @@ class RGBModel(AEModel):
         self.compute_reconstruction_loss(obs, obs_augm, decoder_latent_lambda)
 
 class ATCModel(AEModel):
-    def __init__(self, model_params, encoder_only=True):
+    def __init__(self, model_params, encoder_only=False):
         super(ATCModel, self).__init__('atc')
         self.encoder.append(PixelMDPEncoder(
-            model_params['image_shape'], model_params['latent_dim'],
-            num_layers=model_params['num_layers'], num_filters=model_params['num_filters']))
-        self.decoder.append(PixelDecoder(
             model_params['image_shape'], model_params['latent_dim'],
             num_layers=model_params['num_layers'], num_filters=model_params['num_filters']))
         self.momentum_encoder = PixelMDPEncoder(
             model_params['image_shape'], model_params['latent_dim'],
             num_layers=model_params['num_layers'], num_filters=model_params['num_filters'])
+        if not encoder_only:
+            self.decoder.append(PixelDecoder(
+                model_params['image_shape'], model_params['latent_dim'],
+                num_layers=model_params['num_layers'], num_filters=model_params['num_filters']))
+
         self.momentum_encoder.load_state_dict(self.encoder[0].state_dict())
         self.loss = InfoNCE()
         self.avg_encoder = optim.swa_utils.AveragedModel(self.encoder[0])
@@ -301,7 +305,7 @@ class ATCModel(AEModel):
         # TODO: positive keys from positive rewards and viceversa
         nceloss = self.loss(z_t, z_t1)
         summary_scalar(f'Loss/Contrastive/{self.type}/InfoNCE', nceloss.item())
-        return nceloss * 1e-3
+        return nceloss * 1e-8
 
     def compute_compression_loss(self, obs, obs_t1, temperature=1):
         """Compute compression loss.

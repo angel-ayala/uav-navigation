@@ -31,7 +31,7 @@ class ReplayBuffer:
             self.observations[self.index] = observation
             self.next_obs[self.index] = next_obs
 
-        if type(action) == list:
+        if type(action) in [list, np.ndarray]:
             self.actions[self.index] = action
         else:
             dims = (self.action_shape[0], self.action_shape[0])
@@ -215,7 +215,7 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         super().add(state, action, reward, next_state, done)
 
         # $p_i^\alpha$, new samples get `max_priority`
-        priority_alpha = self.max_priority ** self.alpha
+        priority_alpha = self.max_priority ** self.alpha if self.size else 1.0
         # Update the two segment trees for sum and minimum
         self._set_priority_min(idx, priority_alpha)
         self._set_priority_sum(idx, priority_alpha)
@@ -293,8 +293,8 @@ class PrioritizedReplayBuffer(ReplayBuffer):
     def last_n(self, n, device=None):
         indices = [self.index - i for i in range(n)]
         samples = {
-            'weights': np.zeros(shape=n, dtype=np.float32),
-            'indexes': np.zeros(shape=n, dtype=np.int32)
+            'weights': np.ones(shape=n, dtype=np.float32),
+            'indexes': np.array(indices, dtype=np.int32)
         }
         return self.get_indices(indices, device=device), samples
 
@@ -312,7 +312,7 @@ class PrioritizedReplayBuffer(ReplayBuffer):
             samples['indexes'][i] = idx
 
         # $\min_i P(i) = \frac{\min_i p_i^\alpha}{\sum_k p_k^\alpha}$
-        prob_min = self._min() / self._sum()
+        prob_min = max(self._min() / self._sum(), 1e-8)
         # $\max_i w_i = \bigg(\frac{1}{N} \frac{1}{\min_i P(i)}\bigg)^\beta$
         max_weight = (prob_min * self.size) ** (-self.beta)
 
@@ -340,6 +340,7 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         for idx, priority in zip(indexes, priorities):
             # Set current max priority
             self.max_priority = max(self.max_priority, priority)
+            priority = max(priority, 1e-8)
 
             # Calculate $p_i^\alpha$
             priority_alpha = priority ** self.alpha

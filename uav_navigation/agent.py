@@ -141,7 +141,9 @@ class DDQNAgent:
                  epsilon_start=1.0,
                  epsilon_end=0.01,
                  epsilon_steps=500000,
-                 memory_buffer=None):
+                 memory_buffer=None,
+                 train_freq=4,
+                 target_update_freq=100):
         self.state_shape = state_shape
         self.action_shape = action_shape
         self.discount_factor = discount_factor
@@ -149,6 +151,8 @@ class DDQNAgent:
         self.epsilon_end = epsilon_end
         self.epsilon_decay = (epsilon_start - epsilon_end) / epsilon_steps
         self.action_shape = action_shape[0]
+        self.target_update_freq = target_update_freq
+        self.train_freq = train_freq
         # Q-networks
         self.approximator = approximator
         # Replay Buffer
@@ -180,7 +184,15 @@ class DDQNAgent:
     def update_target(self):
         self.approximator.update_target_network()
 
-    def update(self):
+    def update(self, step):
+        self.update_epsilon(step)
+        if step % self.train_freq == 0:
+            self.update_td()
+        
+        if step % self.target_update_freq == 0:
+            self.update_target()
+
+    def update_td(self):
         # Update the Q-network if replay buffer is sufficiently large
         if len(self.memory) >= self.BATCH_SIZE:
             sampled_data = self.memory.sample(

@@ -268,6 +268,9 @@ class SRLDDQNAgent(DDQNAgent):
                  epsilon_end=0.01,
                  epsilon_steps=500000,
                  memory_buffer=None,
+                 train_freq=4,
+                 target_update_freq=100,
+                 reconstruct_freq=1,
                  srl_loss=False,
                  priors=False):
         super().__init__(
@@ -284,6 +287,7 @@ class SRLDDQNAgent(DDQNAgent):
         self.init_models()
         self.priors = priors
         self.srl_loss = srl_loss
+        self.reconstruct_freq = reconstruct_freq
         if priors:
             self.init_priors()
 
@@ -312,7 +316,7 @@ class SRLDDQNAgent(DDQNAgent):
             if ae_model.type in ["atc"]:
                 ae_model.update_momentum_encoder(0.01)
                 total_loss.append(ae_model.compute_contrastive_loss(obs_2d_augm, obs_2d_t1_augm))
-                total_loss.append(ae_model.compute_compression_loss(obs_2d, obs_2d_t1))
+                # total_loss.append(ae_model.compute_compression_loss(obs_2d, obs_2d_t1))
                 total_loss.append(ae_model.compute_reconstruction_loss(obs_2d, obs_2d_augm, self.approximator.decoder_latent_lambda))
                 # ae_model.update_momentum_encoder(self.approximator.tau)
 
@@ -338,13 +342,18 @@ class SRLDDQNAgent(DDQNAgent):
         summary_scalar("Loss/Representation", tloss.item())
         return tloss
 
-    def update_representation(self):
+    def update_reconstruction(self):
         # Update the autoencoder models if replay buffer is sufficiently large
         if len(self.memory) >= self.BATCH_SIZE:
             # sampled_data = self.memory.random_sample(self.BATCH_SIZE, device=self.approximator.device)
             sampled_data = self.memory.sample(self.BATCH_SIZE, device=self.approximator.device)
             rec_loss = self.compute_reconstruction_loss(sampled_data)
             self.approximator.update_representation(rec_loss)
+
+    def update(self, step):
+        super().update(step)
+        if step % self.reconstruct_freq == 0:
+            self.update_reconstruction()
 
     def save(self, path, encoder_only=False):
         self.approximator.save(path, ae_models=self.ae_models)

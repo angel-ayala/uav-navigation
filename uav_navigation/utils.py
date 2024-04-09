@@ -19,13 +19,18 @@ from .logger import summary_create
 from .logger import summary_step
 
 
-def profile_model(model, input_shape, device):
+def profile_model(model, input_shape, device, action_shape=None):
     """Profiling developed models.
 
     based on https://github.com/angel-ayala/kutralnet/blob/master/utils/profiling.py"""
     x = torch.randn(input_shape).unsqueeze(0).to(device)
-    flops, params = profile(model, verbose=False,
-                            inputs=(x, ),)
+    if action_shape:
+        y = torch.randn(action_shape).unsqueeze(0).to(device)
+        flops, params = profile(model, verbose=False,
+                                inputs=(x, y),)
+    else:
+        flops, params = profile(model, verbose=False,
+                                inputs=(x, ),)
     return flops, params
 
 
@@ -77,9 +82,8 @@ def obs2tensor(observations):
         return torch.tensor(np.array(observations), dtype=torch.float32)
 
 
-def run_agent(agent, env, training_steps, mem_steps, train_frequency,
-              target_update_steps, eval_interval, eval_epsilon, eval_steps,
-              outpath, step_callback=None, reconstruct_frequency=1):
+def run_agent(agent, env, training_steps, mem_steps, eval_interval,
+              eval_epsilon, eval_steps, outpath, step_callback=None):
     summary_create(outpath / 'logs')
     ended = True
     total_reward = 0
@@ -122,21 +126,13 @@ def run_agent(agent, env, training_steps, mem_steps, train_frequency,
         action, reward, next_state, ended = do_step(
             agent, env, state, step_callback, must_remember=True)
 
-        if step % reconstruct_frequency == 0:
-            agent.update_representation()
-
-        if step % train_frequency == 0:
-            agent.update()
-
-        if step % target_update_steps == 0:
-            agent.update_target()
+        agent.update(step)
 
         ep_reward += reward
         state = next_state
         ep_steps += 1
         summary().add_scalar('Learning/StepReward', reward, step)
 
-        agent.update_epsilon(step)
         tbar.update(1)
         # after training steps, began evaluation
         if (step + 1) % eval_interval == 0:

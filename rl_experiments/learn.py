@@ -220,6 +220,8 @@ if __name__ == '__main__':
         epsilon_start=args.epsilon_start,
         epsilon_end=args.epsilon_end,
         epsilon_steps=args.epsilon_steps,
+        train_freq=args.train_frequency,
+        target_update_freq=args.target_update_frequency,
     )
 
     # Append SRL models
@@ -280,6 +282,7 @@ if __name__ == '__main__':
                                          decoder_weight_decay=args.decoder_weight_decay)
         approximator_params['q_app_params']['latent_dim'] *= len(
             ae_models.keys())
+        agent_params['reconstruct_freq'] = args.reconstruct_frequency
         agent_params['ae_models'] = ae_models
         agent_params['srl_loss'] = args.use_srl_loss
         agent_params['priors'] = args.use_priors
@@ -337,9 +340,6 @@ if __name__ == '__main__':
     run_params = dict(
         training_steps=args.steps,
         mem_steps=args.memory_steps,
-        train_frequency=args.train_frequency,
-        target_update_steps=args.target_update_frequency,
-        reconstruct_frequency=args.reconstruct_frequency,
         eval_interval=args.eval_interval,
         eval_epsilon=args.eval_epsilon,
         eval_steps=args.eval_steps,
