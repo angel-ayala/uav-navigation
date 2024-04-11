@@ -82,6 +82,17 @@ def obs2tensor(observations):
         return torch.tensor(np.array(observations), dtype=torch.float32)
 
 
+def format_obs(observation, is_pixels=False):
+    observation = obs2tensor(observation)
+
+    if len(observation.shape) == 3 and is_pixels:
+        observation = observation.unsqueeze(0)
+    if len(observation.shape) == 1 and not is_pixels:
+        observation = observation.unsqueeze(0)
+
+    return observation
+
+
 def run_agent(agent, env, training_steps, mem_steps, eval_interval,
               eval_epsilon, eval_steps, outpath, step_callback=None):
     summary_create(outpath / 'logs')

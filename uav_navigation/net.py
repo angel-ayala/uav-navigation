@@ -65,7 +65,7 @@ class QFeaturesNetwork(nn.Module):
                                 gain=nn.init.calculate_gain('linear'))
 
     def forward(self, state, action=None):
-        h = torch.relu(self._h1(state))
+        h = torch.relu(self._h1(state / 255.))
         h = torch.relu(self._h2(h))
         h = torch.relu(self._h3(h))
         h = torch.relu(self._h4(h.view(-1, 3136)))

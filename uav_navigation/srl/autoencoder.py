@@ -7,7 +7,6 @@ Created on Fri Jan 26 15:28:24 2024
 """
 
 import torch
-import torchvision
 from torch.nn import functional as F
 from torch import optim
 from thop import clever_format
@@ -21,17 +20,17 @@ from .net import preprocess_obs
 from .net import rgb_reconstruction_model
 from .net import PixelDecoder
 from .net import PixelMDPEncoder
-from .net import vector_reconstruction_model
-from .net import imu2pose_model
-from .net import slowness_cost
-from .net import variability_cost
-from .net import proportionality_cost
-from .net import repeatability_cost
+# from .net import vector_reconstruction_model
+# from .net import imu2pose_model
+# from .net import slowness_cost
+# from .net import variability_cost
+# from .net import proportionality_cost
+# from .net import repeatability_cost
 from .net import adabelief_optimizer
-from .net import MS_SSIM_Loss, SSIM_Loss
-from .net import logarithmic_difference_loss
-from .net import BiGRU
-
+from .loss import SSIM_Loss
+# from .net import logarithmic_difference_loss
+# from .net import BiGRU
+from ..logger import log_image_batch
 
 
 def profile_ae_model(ae_model, state_shape, device):
@@ -163,8 +162,8 @@ class AEModel:
 
     def compute_state_priors(self, obs_t, actions, rewards, obs_t1):
         actions_argmax = actions.argmax(-1)
-        s_t = self(obs_t)
-        s_t1 = self(obs_t1)
+        s_t = self.encode_obs(obs_t)
+        s_t1 = self.encode_obs(obs_t1)
 
         state_diff = s_t1 - s_t
         state_diff_norm = torch.norm(state_diff, p=2., dim=-1)
@@ -189,38 +188,32 @@ class AEModel:
                 amask2 = actions_mask.nonzero().flatten()[i+1]
                 if r_diff != 0:
                     causality_loss += torch.exp(-similarity(s_t1[amask1], s_t1[amask2]) ** 2).mean()
-        summary_scalar(f'Loss/{self.type}/Encoder/Slowness', slowness_loss.item())
+        summary_scalar(f'Loss/{self.type}/Slowness', slowness_loss.item())
         # summary_scalar(f'Loss/{self.type}/Encoder/Variability', variability_loss.item())
-        summary_scalar(f'Loss/{self.type}/Encoder/Causality', causality_loss.item())
-        summary_scalar(f'Loss/{self.type}/Encoder/Proportionality', proportionality_loss.item())
-        summary_scalar(f'Loss/{self.type}/Encoder/Repeatibility', repeatability_loss.item())
+        summary_scalar(f'Loss/{self.type}/Causality', causality_loss.item())
+        summary_scalar(f'Loss/{self.type}/Proportionality', proportionality_loss.item())
+        summary_scalar(f'Loss/{self.type}/Repeatibility', repeatability_loss.item())
         # state_priors_loss = slowness_loss + variability_loss + proportionality_loss + repeatability_loss
         state_priors_loss = slowness_loss + causality_loss + proportionality_loss + repeatability_loss
-        summary_scalar(f'Loss/{self.type}/Encoder/S+V+P+R', state_priors_loss.item())
-        return state_priors_loss
+        summary_scalar(f'Loss/{self.type}/S+V+P+R', state_priors_loss.item())
+        return state_priors_loss        
 
     def compute_reconstruction_loss(self, obs, obs_augm, decoder_latent_lambda):
-        rec_obs, h = self.reconstruct_obs(obs_augm / 255.)
-
-        if self.n_calls % self.LOG_FREQ == 0:
-            rec_seq = rec_obs[-1]
-            rec_frames = rec_seq.reshape((3, rec_seq.shape[0] // 3, rec_seq.shape[1], rec_seq.shape[2]))
-            img_grid = torchvision.utils.make_grid(rec_frames + 0.5)
-            summary_image(f"Agent/reconstruction", img_grid)
-            obs_frames = obs[-1].reshape((3, obs[-1].shape[0] // 3, obs[-1].shape[1], obs[-1].shape[2]))
-            obs_grid = torchvision.utils.make_grid(obs_frames / 255.)
-            summary_image(f"Agent/observation", obs_grid)
-            obs_frames = obs_augm[-1].reshape((3, obs[-1].shape[0] // 3, obs[-1].shape[1], obs[-1].shape[2]))
-            obs_grid = torchvision.utils.make_grid(obs_frames / 255.)
-            summary_image(f"Agent/observation_augm", obs_grid)
+        rec_obs, h = self.reconstruct_obs(obs_augm)
 
         # preprocess images to be in [-0.5, 0.5] range
         target_obs = preprocess_obs(obs)
-        target_obs = target_obs.reshape((target_obs.shape[0] * 3, 3, target_obs.shape[-2], target_obs.shape[-1]))
-        rec_obs = rec_obs.reshape((rec_obs.shape[0] * 3, 3, rec_obs.shape[-2], rec_obs.shape[-1]))
+        # de-stack
+        obs_shape = obs.shape
+        n_stack = obs_shape[1] // 3
+        r_shape = (obs_shape[0] * n_stack, 3) + obs_shape[-2:]
+        # target_obs = target_obs.reshape((target_obs.shape[0] * 3, 3, target_obs.shape[-2], target_obs.shape[-1]))
+        # rec_obs = rec_obs.reshape((rec_obs.shape[0] * 3, 3, rec_obs.shape[-2], rec_obs.shape[-1]))
+        target_obs = target_obs.reshape(r_shape)
+        output_obs = rec_obs.reshape(r_shape)
         # rec_obs = torch.clip(rec_obs, -1, 1) * 0.5
 
-        rec_loss = F.mse_loss(rec_obs, target_obs) #* 10
+        rec_loss = F.mse_loss(target_obs, output_obs) #* 10
         summary_scalar(f'Loss/Reconstruction/{self.type}/MSE', rec_loss.item())
         # bce_loss = F.binary_cross_entropy(rec_obs + 0.5, target_obs + 0.5)
         # summary_scalar(f'Loss/Reconstruction/{self.type}/BCE', bce_loss.item())
@@ -241,13 +234,19 @@ class AEModel:
 
         rloss = rec_loss + decoder_latent_lambda * latent_loss
         summary_scalar(f'Loss/Reconstruction/{self.type}', rloss.item())
+
+        if self.n_calls % self.LOG_FREQ == 0:
+            log_image_batch(obs, "Agent/observation")
+            log_image_batch(obs_augm, "Agent/observation_augm")
+            log_image_batch(rec_obs + 0.5, "Agent/reconstruction")
+
         self.n_calls += 1
         return rloss
 
 
 class RGBModel(AEModel):
     def __init__(self, model_params, encoder_only=False):
-        super(RGBModel, self).__init__('rgb')
+        super(RGBModel, self).__init__('RGB')
         rgb_encoder, rgb_decoder = rgb_reconstruction_model(
             model_params['image_shape'],
             model_params['latent_dim'],
@@ -262,11 +261,12 @@ class RGBModel(AEModel):
         self.avg_encoder.update_parameters(self.encoder[0])
 
     def compute_loss(self, obs, obs_augm, decoder_latent_lambda):
-        self.compute_reconstruction_loss(obs, obs_augm, decoder_latent_lambda)
+        return self.compute_reconstruction_loss(obs, obs_augm, decoder_latent_lambda)
+
 
 class ATCModel(AEModel):
-    def __init__(self, model_params, encoder_only=False):
-        super(ATCModel, self).__init__('atc')
+    def __init__(self, model_params, encoder_only=True):
+        super(ATCModel, self).__init__('ATC')
         self.encoder.append(PixelMDPEncoder(
             model_params['image_shape'], model_params['latent_dim'],
             num_layers=model_params['num_layers'], num_filters=model_params['num_filters']))
@@ -295,17 +295,32 @@ class ATCModel(AEModel):
         super().to(device)
         self.momentum_encoder.to(device)
 
+    def compute_loss(self, obs_augm, obs_t1_augm):
+        return self.compute_contrastive_loss(obs_augm, obs_t1_augm)
+
     def compute_contrastive_loss(self, obs_augm, obs_t1_augm):
         """Compute Augmented Temporal Contrast loss function.
 
         based on https://arxiv.org/pdf/2009.08319.pdf
         """
-        z_t = self.encoder[0].forward_code(obs_augm / 255.)  # query
-        z_t1 = self.momentum_encoder(obs_t1_augm / 255.)  # positive keys
+        z_t = self.encoder[0].forward_code(obs_augm)  # query
+        z_t1 = self.momentum_encoder(obs_t1_augm)  # positive keys
         # TODO: positive keys from positive rewards and viceversa
         nceloss = self.loss(z_t, z_t1)
         summary_scalar(f'Loss/Contrastive/{self.type}/InfoNCE', nceloss.item())
         return nceloss * 1e-8
+
+
+class ATCRGBModel(ATCModel):
+    def __init__(self, model_params):
+        super(LossModel, self).__init__(model_params, encoder_only=False)
+        self.type = 'ATC-RGB'
+
+
+class LossModel(ATCModel):
+    def __init__(self, model_params, encoder_only=True):
+        super(LossModel, self).__init__(model_params, encoder_only=encoder_only)
+        self.type = 'ATCLoss'
 
     def compute_compression_loss(self, obs, obs_t1, temperature=1):
         """Compute compression loss.
@@ -314,8 +329,8 @@ class ATCModel(AEModel):
         """
         # z_t = self.encoder[0](obs)
         # z_t1 = self.momentum_encoder(obs_t1)
-        z_t = self.encoder[0].forward_prob(obs / 255.)
-        z_t1 = self.momentum_encoder.forward_prob(obs_t1 / 255.)
+        z_t = self.encoder[0].forward_prob(obs)
+        z_t1 = self.momentum_encoder.forward_prob(obs_t1)
         # z_t_norm = (z_t + 1.) / 2.
         # z_t1_norm = (z_t1 + 1.) / 2.
         # z_t_norm = F.softmax(z_t, dim=1)

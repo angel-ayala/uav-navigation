@@ -9,7 +9,7 @@ Based on:
 https://arxiv.org/abs/1910.01741
 """
 import torch
-from torchvision.transforms import AutoAugment
+# from torchvision.transforms import AutoAugment
 # from torchvision.transforms import AugMix
 from thop import clever_format
 from uav_navigation.agent import QFunction
@@ -21,9 +21,10 @@ from .net import PriorModel
 from .net import NorthBelief
 from .net import PositionBelief
 from .net import OrientationBelief
-from .autoencoder import AEModel
+# from .autoencoder import AEModel
 from .autoencoder import RGBModel
 from .autoencoder import ATCModel
+from .autoencoder import ATCRGBModel
 from .autoencoder import profile_ae_model
 
 
@@ -32,9 +33,9 @@ def profile_srl_approximator(approximator, state_shape, action_shape):
     q_feature_dim = 0
     for m in approximator.models:
         if approximator.is_multimodal:
-            if m.type in ['rgb', 'atc']:
+            if any(t in m.type for t in ['RGB', 'ATC']):
                 flops, params = profile_ae_model(m, state_shape[0], approximator.device)
-            if m.type == 'vector':
+            if m.type == 'VECTOR':
                 flops, params = profile_ae_model(m, state_shape[1], approximator.device)
         else:
             flops, params = profile_ae_model(m, state_shape, approximator.device)
@@ -52,19 +53,11 @@ def profile_srl_approximator(approximator, state_shape, action_shape):
     return total_flops, total_params
 
 
-
-class SRLFunction(QFunction):
-    def __init__(self, q_app_fn, q_app_params, learning_rate=1e-3,
-                 momentum=0.9, tau=0.1, use_cuda=True, is_multimodal=True,
-                 decoder_latent_lambda=1e-6):
-        super().__init__(q_app_fn, q_app_params, learning_rate, momentum,
-                         tau=tau, use_cuda=use_cuda)
+class SRLFunction:
+    def __init__(self, decoder_latent_lambda=1e-6):
+        self.decoder_latent_lambda = decoder_latent_lambda
         self.models = list()
         self.priors = list()
-        self.decoder_latent_lambda = decoder_latent_lambda
-        self.is_multimodal = is_multimodal
-        self.augment_model = AutoAugment()
-        # self.augment_model = AugMix()
 
     def append_autoencoder(self, ae_model,
                            encoder_lr,
@@ -74,6 +67,74 @@ class SRLFunction(QFunction):
         ae_model.apply(weight_init)
         ae_model.adabelief_optimizer(encoder_lr, decoder_lr, decoder_weight_decay)
         self.models.append(ae_model)
+
+    def append_autoencoders(self, models):
+        # ensure empty list
+        if hasattr(self, 'models'):
+            del self.models
+
+        self.models = list()
+        for m, m_params in models.items():
+            # RGB observation reconstruction autoencoder model
+            if m =='RGB':
+                ae_model = RGBModel(m_params)
+            if m =='ATC':
+                ae_model = ATCModel(m_params)
+            if m =='ATC-RGB':
+                ae_model = ATCRGBModel(m_params)
+            self.append_autoencoder(
+                ae_model, m_params['encoder_lr'], m_params['decoder_lr'],
+                m_params['decoder_weight_decay'])
+
+    def compute_z(self, observations, latent_types=None):
+        z_hat = list()
+        # obs_2d, obs_1d = self.format_obs(observations)
+        if self.is_multimodal:
+            obs_2d, obs_1d = observations
+        elif self.is_pixels:
+            obs_2d = observations
+        else:
+            obs_1d = observations
+
+        for m in self.models:
+            if latent_types is None or m.type in latent_types:
+                if any(t in m.type for t in ['RGB', 'ATC']):
+                    z = m.encode_obs(obs_2d.to(self.device))
+                if any(t in m.type for t in ['VECTOR', 'imu2pose']):
+                    z = m.encode_obs(obs_1d.to(self.device))
+                if z.dim() == 1:
+                    z = z.unsqueeze(0)
+                z_hat.append(z)
+        z_hat = torch.cat(z_hat, dim=1)
+        return z_hat
+
+    def compute_ae_loss(self, obs, actions, rewards, obs_t1, dones):
+        if self.is_multimodal:
+            obs_2d, obs_1d = self.format_obs(obs, augment=False)
+            obs_2d_augm, obs_1d_augm = self.format_obs(obs, augment=True)
+            obs_2d_t1_augm, obs_1d_t1_augm = self.format_obs(obs_t1, augment=True)
+        elif self.is_pixels:
+            obs_2d = self.format_obs(obs, augment=False)
+            obs_2d_augm = self.format_obs(obs, augment=True)
+            obs_2d_t1_augm = self.format_obs(obs_t1, augment=True)
+        else:
+            obs_1d = self.format_obs(obs, augment=False)
+            obs_1d_augm = self.format_obs(obs, augment=True)
+            obs_1d_t1_augm = self.format_obs(obs_t1, augment=True)
+
+        total_loss = list()
+        for ae_model in self.models:
+            if "ATC" in ae_model.type:
+                ae_model.update_momentum_encoder(0.01)
+                loss = ae_model.compute_loss(obs_2d_augm, obs_2d_t1_augm)
+            if "RGB" in ae_model.type:
+                loss = ae_model.compute_loss(obs_2d, obs_2d_augm, self.decoder_latent_lambda)
+            if "VECTOR" in ae_model.type:
+                loss = ae_model.compute_loss(obs_1d, obs_1d, self.decoder_latent_lambda)
+            total_loss.append(loss)
+        tloss = torch.sum(torch.stack(total_loss))
+        summary_scalar("Loss/AutoEncoders", tloss.item())
+        return tloss
 
     def append_prior(self, belief_model, learning_rate=1e-3):
         belief_model.to(self.device)
@@ -96,78 +157,13 @@ class SRLFunction(QFunction):
                 x_true = pmodel.obs2target(obs_1d)
 
             loss = pmodel.compute_loss(hat_x, x_true)
-            summary_scalar(f"Prior/{pmodel.name}/ReconstructionLoss", loss.item())
+            summary_scalar(f"Loss/Prior/{pmodel.name}", loss.item())
             loss_list.append(loss)
 
-        return torch.stack(loss_list)
-
-    def append_models(self, models):
-        # ensure empty list
-        if hasattr(self, 'models'):
-            del self.models
-        self.models = list()
-        for m, m_params in models.items():
-            # RGB observation reconstruction autoencoder model
-            if m =='rgb':
-                ae_model = RGBModel(m_params)
-            if m =='atc':
-                ae_model = ATCModel(m_params)
-            self.append_autoencoder(
-                ae_model, m_params['encoder_lr'], m_params['decoder_lr'],
-                m_params['decoder_weight_decay'])
-
-    def format_obs(self, obs, augment=False):
-        if self.is_multimodal:
-            obs_2d = obs[0]
-            obs_1d = obs[1]
-        else:
-            obs_2d = obs
-            obs_1d = obs
-
-        obs_2d = super().format_obs(obs_2d, is_pixels=True)
-        obs_1d = super().format_obs(obs_1d, is_pixels=False)
-
-        # augment pixel values
-        if augment:
-            orig_shape = obs_2d.shape
-            obs_frames = obs_2d.reshape((obs_2d.shape[0] * 3, 3, obs_2d.shape[-2], obs_2d.shape[-1]))
-            obs_2d = torch.cat([self.augment_model(frame.to(torch.uint8)) for frame in obs_frames])
-            obs_2d = obs_2d.reshape(orig_shape).to(torch.float32)
-
-        return obs_2d.to(self.device), obs_1d.to(self.device)
-
-    def compute_z(self, observations, latent_types=None):
-        z_hat = list()
-        obs_2d, obs_1d = self.format_obs(observations)
-
-        for m in self.models:
-            if latent_types is None or m.type in latent_types:
-                if m.type in ['rgb', 'atc']:
-                    z = m.encode_obs(obs_2d.to(self.device))
-                if m.type in ['vector', 'imu2pose']:
-                    z = m.encode_obs(obs_1d.to(self.device))
-                if z.dim() == 1:
-                    z = z.unsqueeze(0)
-                z_hat.append(z)
-        z_hat = torch.cat(z_hat, dim=1)
-        return z_hat
-
-    def compute_q(self, observations, actions=None):
-        # Compute Q-values using the inferenced z latent representation
-        z_hat = self.compute_z(observations)
-        return super().compute_q(z_hat, actions)
-
-    def compute_q_target(self, observations, actions=None):
-        # Compute Q-values using the target Q-network
-        z_hat = self.compute_z(observations)
-        return super().compute_q_target(z_hat, actions)
-
-    def update(self, td_loss):
-        for m in self.models:
-            m.encoder_optim[0].zero_grad()
-        super().update(td_loss)
-        for m in self.models:
-            m.encoder_optim[0].step()
+        ploss = torch.stack(loss_list)
+        ploss = ploss.sum()
+        summary_scalar("Loss/Prior", ploss.item())
+        return ploss
 
     def update_encoder(self, enc_loss):
         for m in self.models:
@@ -191,9 +187,6 @@ class SRLFunction(QFunction):
             bmodel.optimizer_step()
 
     def save(self, path, ae_models, encoder_only=False):
-        q_app_path = str(path) + "_q_function.pth"
-        super().save(q_app_path)
-
         for i, (m, _) in enumerate(ae_models.items()):
             ae_model = self.models[i]
             encoder, decoder = ae_model.encoder, ae_model.decoder
@@ -214,20 +207,19 @@ class SRLFunction(QFunction):
             q_app_path = str(path) + f"_ae_{m}.pth"
             torch.save(state_dict, q_app_path)
 
-    def load(self, path, ae_models, eval_only=False, encoder_only=False):
-        q_app_path = str(path) + "_q_function.pth"
-        super().load(q_app_path, eval_only=eval_only)
-
+    def load(self, path, ae_models, encoder_only=False, eval_only=False):
         # ensure empty list
         if hasattr(self, 'models'):
             del self.models
         self.models = list()
 
         for i, (m, m_params) in enumerate(ae_models.items()):
-            if m =='rgb':
+            if m =='RGB':
                 ae_model = RGBModel(m_params, encoder_only=encoder_only)
-            if m =='atc':
+            if m =='ATC':
                 ae_model = ATCModel(m_params, encoder_only=encoder_only)
+            if m =='ATC-RGB':
+                ae_model = ATCRGBModel(m_params, encoder_only=encoder_only)
             self.append_autoencoder(
                 ae_model, m_params['encoder_lr'], m_params['decoder_lr'],
                 m_params['decoder_weight_decay'])
@@ -257,7 +249,97 @@ class SRLFunction(QFunction):
                             checkpoint[f"decoder_optimizer_state_dict_{i}"])
 
 
-class SRLDDQNAgent(DDQNAgent):
+class SRLAgent:
+    def __init__(self,
+                 ae_models,
+                 reconstruct_freq=1,
+                 srl_loss=False,
+                 priors=False):
+        self.ae_models = ae_models
+        self.init_models()
+        self.reconstruct_freq = reconstruct_freq
+        self.srl_loss = srl_loss
+        self.priors = priors
+        if priors:
+            self.init_priors()
+
+    def init_models(self):
+        self.approximator.append_autoencoders(self.ae_models)
+
+    def init_priors(self):
+        self.approximator.append_prior(NorthBelief(self.state_shape[1], 50))
+        self.approximator.append_prior(OrientationBelief(self.state_shape[1], 50), learning_rate=1e-4)
+        self.approximator.append_prior(PositionBelief(self.state_shape[1], 50))
+
+    def update_reconstruction(self):
+        # sampled_data = self.memory.random_sample(self.BATCH_SIZE, device=self.approximator.device)
+        sampled_data = self.memory.sample(self.BATCH_SIZE, device=self.approximator.device)
+
+        if self.is_prioritized:
+            obs, actions, rewards, obs_t1, dones = sampled_data[0]
+        else:
+            obs, actions, rewards, obs_t1, dones = sampled_data
+
+        rec_loss = self.approximator.compute_ae_loss(obs, actions, rewards, obs_t1, dones)
+        # TODO: implement state representation learning loss
+
+        if self.priors:
+            rec_loss += self.approximator.compute_priors_loss(obs, obs_t1, actions)
+
+        summary_scalar("Loss/Representation", rec_loss.item())
+        self.approximator.update_representation(rec_loss)
+
+    def update(self, step):
+        if not self.can_update:
+            return False
+        if step % self.reconstruct_freq == 0:
+            self.update_reconstruction()
+
+    def save(self, path, encoder_only=False):
+        self.approximator.save(path, self.ae_models, encoder_only)
+
+    def load(self, path, eval_only=True, encoder_only=False):
+        self.approximator.load(path, self.ae_models, encoder_only, eval_only)
+
+
+class SRLQFunction(QFunction, SRLFunction):
+    def __init__(self, q_app_fn, q_app_params, learning_rate=1e-3,
+                 momentum=0.9, tau=0.1, use_cuda=True, is_pixels=False,
+                 is_multimodal=False, use_augmentation=True,
+                 decoder_latent_lambda=1e-6):
+        QFunction.__init__(self, q_app_fn, q_app_params, learning_rate,momentum,
+                           tau=tau, use_cuda=use_cuda, is_pixels=is_pixels,
+                           is_multimodal=is_multimodal,
+                           use_augmentation=use_augmentation)
+        SRLFunction.__init__(self, decoder_latent_lambda)
+
+    def compute_q(self, observations, actions=None):
+        # Compute Q-values using the inferenced z latent representation
+        z_hat = self.compute_z(observations)
+        return super().compute_q(z_hat, actions)
+
+    def compute_q_target(self, observations, actions=None):
+        # Compute Q-values using the target Q-network
+        z_hat = self.compute_z(observations)
+        return super().compute_q_target(z_hat, actions)
+
+    def update(self, td_loss):
+        for m in self.models:
+            m.encoder_optim[0].zero_grad()
+        QFunction.update(self, td_loss)
+        for m in self.models:
+            m.encoder_optim[0].step()
+
+    def save(self, path, ae_models, encoder_only=False):
+        QFunction.save(self, path)
+        SRLFunction.save(self, path, ae_models, encoder_only)
+
+    def load(self, path, ae_models, encoder_only=False, eval_only=False):
+        QFunction.load(self, path, eval_only)
+        SRLFunction.load(self, path, ae_models, encoder_only, eval_only)
+
+
+class SRLDDQNAgent(DDQNAgent, SRLAgent):
     def __init__(self,
                  state_shape,
                  action_shape,
@@ -273,91 +355,28 @@ class SRLDDQNAgent(DDQNAgent):
                  reconstruct_freq=1,
                  srl_loss=False,
                  priors=False):
-        super().__init__(
-            state_shape,
-            action_shape,
-            approximator,
-            discount_factor=discount_factor,
-            epsilon_start=epsilon_start,
-            epsilon_end=epsilon_end,
-            epsilon_steps=epsilon_steps,
-            memory_buffer=memory_buffer)
-
-        self.ae_models = ae_models
-        self.init_models()
-        self.priors = priors
-        self.srl_loss = srl_loss
-        self.reconstruct_freq = reconstruct_freq
-        if priors:
-            self.init_priors()
-
-    def init_models(self):
-        self.approximator.append_models(self.ae_models)
-
-    def init_priors(self):
-        self.approximator.append_prior(NorthBelief(self.state_shape[1], 50))
-        self.approximator.append_prior(OrientationBelief(self.state_shape[1], 50), learning_rate=1e-4)
-        self.approximator.append_prior(PositionBelief(self.state_shape[1], 50))
-
-    def compute_reconstruction_loss(self, sampled_data):
-        obs = sampled_data[0][0] if self.is_prioritized else sampled_data[0]
-        actions = sampled_data[0][1] if self.is_prioritized else sampled_data[1]
-        rewards = sampled_data[0][2] if self.is_prioritized else sampled_data[2]
-        obs_t1 = sampled_data[0][3] if self.is_prioritized else sampled_data[3]
-
-        obs_2d, obs_1d = self.approximator.format_obs(obs, augment=False)
-        obs_2d_t1, obs_1d_t1 = self.approximator.format_obs(obs_t1, augment=False)
-        obs_2d_augm, _ = self.approximator.format_obs(obs, augment=True)
-        obs_2d_t1_augm, _ = self.approximator.format_obs(obs_t1, augment=True)
-
-        total_loss = list()
-        srl_loss = list()
-        for ae_model in self.approximator.models:
-            if ae_model.type in ["atc"]:
-                ae_model.update_momentum_encoder(0.01)
-                total_loss.append(ae_model.compute_contrastive_loss(obs_2d_augm, obs_2d_t1_augm))
-                # total_loss.append(ae_model.compute_compression_loss(obs_2d, obs_2d_t1))
-                total_loss.append(ae_model.compute_reconstruction_loss(obs_2d, obs_2d_augm, self.approximator.decoder_latent_lambda))
-                # ae_model.update_momentum_encoder(self.approximator.tau)
-
-            if ae_model.type in ["rgb"]:
-                total_loss.append(
-                    ae_model.compute_loss(
-                        obs_2d, obs_2d_augm, self.approximator.decoder_latent_lambda))
-                if self.srl_loss:
-                    srl_loss.append(ae_model.compute_state_priors(obs_2d, actions, rewards, obs_2d_t1))
-            if ae_model.type in ["vector"]:
-                loss = ae_model.compute_loss(obs_1d, obs_1d, self.approximator.decoder_latent_lambda)
-                total_loss.append(loss)
-                if self.srl_loss:
-                    srl_loss.append(ae_model.compute_state_priors(obs_1d, actions, rewards, obs_1d_t1))
-
-        tloss = torch.sum(torch.stack(total_loss))
-        if self.priors:
-            prior_loss = self.approximator.compute_priors_loss(obs, obs_t1, actions)
-            tloss += prior_loss.mean() * 0.1
-        if self.srl_loss:
-            tloss += torch.mean(torch.stack(srl_loss)) * 0.1  # \times lambda
-
-        summary_scalar("Loss/Representation", tloss.item())
-        return tloss
-
-    def update_reconstruction(self):
-        # Update the autoencoder models if replay buffer is sufficiently large
-        if len(self.memory) >= self.BATCH_SIZE:
-            # sampled_data = self.memory.random_sample(self.BATCH_SIZE, device=self.approximator.device)
-            sampled_data = self.memory.sample(self.BATCH_SIZE, device=self.approximator.device)
-            rec_loss = self.compute_reconstruction_loss(sampled_data)
-            self.approximator.update_representation(rec_loss)
+        DDQNAgent.__init__(self,
+                           state_shape,
+                           action_shape,
+                           approximator,
+                           discount_factor=discount_factor,
+                           epsilon_start=epsilon_start,
+                           epsilon_end=epsilon_end,
+                           epsilon_steps=epsilon_steps,
+                           memory_buffer=memory_buffer,
+                           train_freq=train_freq,
+                           target_update_freq=target_update_freq)
+        SRLAgent.__init__(self, ae_models,
+                          reconstruct_freq=reconstruct_freq,
+                          srl_loss=srl_loss,
+                          priors=priors)
 
     def update(self, step):
-        super().update(step)
-        if step % self.reconstruct_freq == 0:
-            self.update_reconstruction()
+        DDQNAgent.update(self, step, augment=False)
+        SRLAgent.update(self, step)
 
     def save(self, path, encoder_only=False):
-        self.approximator.save(path, ae_models=self.ae_models)
+        SRLAgent.save(self, path, encoder_only)
 
     def load(self, path, eval_only=True, encoder_only=False):
-        self.approximator.load(path, ae_models=self.ae_models,
-                               eval_only=eval_only, encoder_only=encoder_only)
+        SRLAgent.load(self, path, eval_only, encoder_only)

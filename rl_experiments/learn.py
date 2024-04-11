@@ -16,7 +16,7 @@ from pathlib import Path
 
 from uav_navigation.agent import DDQNAgent, QFunction
 from uav_navigation.net import QNetwork, QFeaturesNetwork
-from uav_navigation.srl.agent import SRLDDQNAgent, SRLFunction
+from uav_navigation.srl.agent import SRLDDQNAgent, SRLQFunction
 from uav_navigation.srl.net import q_function
 from uav_navigation.memory import ReplayBuffer, PrioritizedReplayBuffer
 from uav_navigation.utils import save_dict_json, run_agent
@@ -201,6 +201,7 @@ if __name__ == '__main__':
                                     add_target=args.add_target)
         state_shape = (env.observation_space[0].shape,
                        env.observation_space[1].shape)
+
     else:
         add_target = False
         if args.add_target and not args.is_pixels:
@@ -211,6 +212,7 @@ if __name__ == '__main__':
         if args.frame_stack > 1:
             env = ObservationStack(env, k=args.frame_stack)
             env_params['frame_stack'] = args.frame_stack
+        state_shape = env.observation_space.shape
 
     # Agent args
     agent_params = dict(
@@ -231,11 +233,13 @@ if __name__ == '__main__':
         momentum=args.approximator_momentum,
         tau=args.approximator_tau,
         use_cuda=args.use_cuda,
-        is_multimodal=is_multimodal)
+        is_pixels=args.is_pixels,
+        is_multimodal=is_multimodal,
+        use_augmentation=True)
 
     if args.is_srl:
         agent_class = SRLDDQNAgent
-        q_approximator = SRLFunction
+        q_approximator = SRLQFunction
         approximator_params['q_app_fn'] = q_function
         approximator_params['q_app_params'] = dict(
             latent_dim=args.latent_dim,
@@ -245,7 +249,7 @@ if __name__ == '__main__':
 
         if args.model_rgb:
             image_shape = agent_params['state_shape'][0] if is_multimodal else agent_params['state_shape']
-            ae_models['rgb'] = dict(image_shape=image_shape,
+            ae_models['RGB'] = dict(image_shape=image_shape,
                                     latent_dim=args.latent_dim,
                                     num_layers=args.num_layers,
                                     num_filters=args.num_filters,
@@ -254,32 +258,14 @@ if __name__ == '__main__':
                                     decoder_weight_decay=args.decoder_weight_decay)
         if args.model_atc:
             image_shape = agent_params['state_shape'][0] if is_multimodal else agent_params['state_shape']
-            ae_models['atc'] = dict(image_shape=image_shape,
+            ae_models['ATC'] = dict(image_shape=image_shape,
                                     latent_dim=args.latent_dim,
                                     num_layers=args.num_layers,
                                     num_filters=args.num_filters,
                                     encoder_lr=args.encoder_lr,
                                     decoder_lr=args.decoder_lr,
                                     decoder_weight_decay=args.decoder_weight_decay)
-        if args.model_vector:
-            vector_shape = agent_params['state_shape'][1] if is_multimodal else agent_params['state_shape']
-            ae_models['vector'] = dict(vector_shape=vector_shape,
-                                        hidden_dim=args.hidden_dim,
-                                        latent_dim=args.latent_dim,
-                                        num_layers=args.num_layers,
-                                        encoder_lr=args.encoder_lr,
-                                        decoder_lr=args.decoder_lr,
-                                        decoder_weight_decay=args.decoder_weight_decay)
-        if args.model_pose:
-            ae_models['imu2pose'] = dict(imu_shape=(6, ),
-                                         pos_shape=(6, ),
-                                         hidden_dim=args.hidden_dim,
-                                         latent_dim=args.latent_dim,
-                                         num_layers=args.num_layers,
-                                         encoder_lr=args.encoder_lr,
-                                         decoder_lr=[args.decoder_lr,
-                                                     args.decoder_lr],
-                                         decoder_weight_decay=args.decoder_weight_decay)
+
         approximator_params['q_app_params']['latent_dim'] *= len(
             ae_models.keys())
         agent_params['reconstruct_freq'] = args.reconstruct_frequency

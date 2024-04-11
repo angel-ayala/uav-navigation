@@ -312,7 +312,7 @@ class PrioritizedReplayBuffer(ReplayBuffer):
             samples['indexes'][i] = idx
 
         # $\min_i P(i) = \frac{\min_i p_i^\alpha}{\sum_k p_k^\alpha}$
-        prob_min = max(self._min() / self._sum(), 1e-8)
+        prob_min = self._min() / self._sum()
         # $\max_i w_i = \bigg(\frac{1}{N} \frac{1}{\min_i P(i)}\bigg)^\beta$
         max_weight = (prob_min * self.size) ** (-self.beta)
 
@@ -340,7 +340,6 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         for idx, priority in zip(indexes, priorities):
             # Set current max priority
             self.max_priority = max(self.max_priority, priority)
-            priority = max(priority, 1e-8)
 
             # Calculate $p_i^\alpha$
             priority_alpha = priority ** self.alpha

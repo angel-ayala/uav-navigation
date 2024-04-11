@@ -7,12 +7,13 @@ Created on Sun Nov 26 15:49:43 2023
 """
 import numpy as np
 import torch
+from torchvision.transforms import AutoAugment
 import torch.nn as nn
 import torch.optim as optim
 from thop import clever_format
 from .utils import profile_model
 from .utils import soft_update_params
-from .utils import obs2tensor
+from .utils import format_obs
 from .memory import is_prioritized_memory
 from .logger import summary_scalar
 from .srl.net import adabelief_optimizer
@@ -32,16 +33,60 @@ def profile_q_approximator(approximator, state_shape, action_shape):
     return flops, params
 
 
-class QFunction:
-
-    def __init__(self, q_app_fn, q_app_params, learning_rate=10e-5,
-                 momentum=0.9, tau=0.1, use_cuda=True):
-
+class GenericFunction:
+    def __init__(self, use_cuda=True, is_pixels=False, is_multimodal=False,
+                 use_augmentation=True):
         self.device = 'cuda'\
             if torch.cuda.is_available() and use_cuda else 'cpu'
+        self.is_pixels = is_pixels
+        self.is_multimodal = is_multimodal
+        self.augment_model = AutoAugment() if use_augmentation else False
+
+    def augment_image(self, obs_2d):
+        if self.augment_model:
+            # de-stack for correct augmentation
+            orig_shape = obs_2d.shape
+            n_stack = obs_2d.shape[1] // 3
+            obs_frames = obs_2d.reshape(
+                (obs_2d.shape[0] * n_stack, 3) + obs_2d.shape[-2:])
+            obs_2d = torch.cat([self.augment_model(frame.to(torch.uint8))
+                                for frame in obs_frames])
+            obs_2d = obs_2d.reshape(orig_shape).to(torch.float32)
+
+        return obs_2d
+
+    def format_multimodal_obs(self, obs, augment=False):
+        obs_2d = format_obs(obs[0], is_pixels=True)
+        obs_1d = format_obs(obs[1], is_pixels=False)
+
+        if augment:
+            obs_2d = self.augment_image(obs_2d)
+
+        return obs_2d.to(self.device), obs_1d.to(self.device)
+
+    def format_unimodal_obs(self, obs, augment=False):
+        observation = format_obs(obs, is_pixels=self.is_pixels)
+
+        if self.is_pixels and augment:
+            observation = self.augment_image(observation)
+
+        return observation.to(self.device)
+
+    def format_obs(self, obs, augment=False):
+        if self.is_multimodal:
+            return self.format_multimodal_obs(obs, augment)
+        else:
+            return self.format_unimodal_obs(obs, augment)
+
+
+class QFunction(GenericFunction):
+
+    def __init__(self, q_app_fn, q_app_params, learning_rate=10e-5,
+                 momentum=0.9, tau=0.1, use_cuda=True, is_pixels=False,
+                 is_multimodal=False, use_augmentation=True):
+        super(QFunction, self).__init__(use_cuda, is_pixels, is_multimodal, use_augmentation)
 
         self.tau = tau
-
         # Q-networks
         self.q_network = q_app_fn(**q_app_params).to(self.device)
         self.target_q_network = q_app_fn(**q_app_params).to(self.device)
@@ -56,23 +101,14 @@ class QFunction:
         #                             momentum=momentum,
         #                             nesterov=True)
         self.optimizer = adabelief_optimizer(self.q_network,
-                                              learning_rate=learning_rate)
+                                             learning_rate=learning_rate)
+
 
     def update_target_network(self):
         # Soft update the target network
         soft_update_params(net=self.q_network,
                            target_net=self.target_q_network,
                            tau=self.tau)
-
-    def format_obs(self, obs, is_pixels=True):
-        observation = obs2tensor(obs)
-
-        if len(observation.shape) == 3 and is_pixels:
-            observation = observation.unsqueeze(0)
-        if len(observation.shape) == 1 and not is_pixels:
-            observation = observation.unsqueeze(0)
-
-        return observation.to(self.device)
 
     def compute_q(self, observations, actions=None):
         # Compute Q-values using the Q-network
@@ -96,7 +132,6 @@ class QFunction:
 
     def compute_ddqn_target(self, rewards, q_values, next_observations, discount_factor, dones):
         with torch.no_grad():
-            next_observations = self.format_obs(next_observations)
             next_q_values = self.compute_q(next_observations)
             double_q_values = self.compute_q_target(next_observations,
                                                     next_q_values)
@@ -112,14 +147,16 @@ class QFunction:
         self.optimizer.step()
 
     def save(self, path):
+        q_app_path = str(path) + "_q_function.pth"
         torch.save({
             'q_network_state_dict': self.q_network.state_dict(),
             'target_q_network_state_dict': self.target_q_network.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
-        }, path)
+        }, q_app_path)
 
     def load(self, path, eval_only=True):
-        checkpoint = torch.load(path, map_location=self.device)
+        q_app_path = str(path) + "_q_function.pth"
+        checkpoint = torch.load(q_app_path, map_location=self.device)
         self.q_network.load_state_dict(checkpoint['q_network_state_dict'])
         self.target_q_network.load_state_dict(checkpoint['target_q_network_state_dict'])
         if not eval_only:
@@ -130,9 +167,39 @@ class QFunction:
             self.target_q_network.eval()
 
 
-class DDQNAgent:
+class GenericAgent:
     BATCH_SIZE = 32
 
+    def __init__(self, 
+                 state_shape,
+                 action_shape,
+                 approximator,
+                 discount_factor=0.99,
+                 memory_buffer=None):
+        self.state_shape = state_shape
+        self.action_shape = action_shape
+        self.discount_factor = discount_factor
+        # approximation function
+        self.approximator = approximator
+        # Replay Buffer
+        self.memory = memory_buffer
+    
+    @property
+    def is_prioritized(self):
+        return is_prioritized_memory(self.memory)
+
+    @property
+    def can_update(self):
+        return len(self.memory) >= self.BATCH_SIZE
+
+    def save(self, path):
+        self.approximator.save(path)
+
+    def load(self, path, eval_only=True):
+        self.approximator.load(path, eval_only)
+
+
+class DDQNAgent(GenericAgent):
     def __init__(self,
                  state_shape,
                  action_shape,
@@ -144,29 +211,20 @@ class DDQNAgent:
                  memory_buffer=None,
                  train_freq=4,
                  target_update_freq=100):
-        self.state_shape = state_shape
-        self.action_shape = action_shape
-        self.discount_factor = discount_factor
+        super(DDQNAgent, self).__init__(
+            state_shape, action_shape, approximator, discount_factor,
+            memory_buffer)
         self.epsilon_start = epsilon_start
         self.epsilon_end = epsilon_end
         self.epsilon_decay = (epsilon_start - epsilon_end) / epsilon_steps
-        self.action_shape = action_shape[0]
+        self.update_epsilon(0)
         self.target_update_freq = target_update_freq
         self.train_freq = train_freq
-        # Q-networks
-        self.approximator = approximator
-        # Replay Buffer
-        self.memory = memory_buffer
-        self.update_epsilon(0)
-
-    @property
-    def is_prioritized(self):
-        return is_prioritized_memory(self.memory)
 
     def select_action(self, state):
         # Choose action using epsilon-greedy policy
         if np.random.rand() < self.epsilon:
-            return np.random.randint(self.action_shape)  # Explore
+            return np.random.randint(self.action_shape[-1])  # Explore
         else:
             with torch.no_grad():
                 observation = self.approximator.format_obs(state)
@@ -181,31 +239,30 @@ class DDQNAgent:
         if self.is_prioritized:
             self.memory.update_beta(n_step)
 
-    def update_target(self):
-        self.approximator.update_target_network()
-
-    def update(self, step):
+    def update(self, step, augment=True):
         self.update_epsilon(step)
+
         if step % self.train_freq == 0:
-            self.update_td()
-        
+            self.update_td(augment)
+
         if step % self.target_update_freq == 0:
-            self.update_target()
+            self.approximator.update_target_network()
 
-    def update_td(self):
+    def update_td(self, augment=True):        
+        if not self.can_update:
+            return False
         # Update the Q-network if replay buffer is sufficiently large
-        if len(self.memory) >= self.BATCH_SIZE:
-            sampled_data = self.memory.sample(
-                self.BATCH_SIZE, device=self.approximator.device)
-            td_loss = self.compute_td_loss(sampled_data)
-            self.approximator.update(td_loss)
-
-    def compute_td_loss(self, sampled_data):
+        sampled_data = self.memory.sample(
+            self.BATCH_SIZE, device=self.approximator.device)
         if self.is_prioritized:
-            (states, actions, rewards, next_states, dones
-             ), priorities = sampled_data
+            states, actions, rewards, next_states, dones = sampled_data[0]
+            priorities = sampled_data[1]
         else:
             states, actions, rewards, next_states, dones = sampled_data
+        
+        # prepare data
+        states = self.approximator.format_obs(states, augment)
+        next_states = self.approximator.format_obs(next_states, augment)
 
         # Compute Q-values using the approximator
         q_values = self.approximator.compute_q(states, actions)
@@ -213,7 +270,7 @@ class DDQNAgent:
             rewards, q_values, next_states, self.discount_factor, dones)
 
         # Compute the loss and backpropagate
-        losses = self.approximator.loss_fn(q_values, td_targets)
+        q_loss = self.approximator.loss_fn(q_values, td_targets)
         if self.is_prioritized:
             td_errors = q_values - td_targets
             # Calculate priorities for replay buffer $p_i = |\delta_i| + \epsilon$
@@ -221,17 +278,12 @@ class DDQNAgent:
             # Update replay buffer priorities
             self.memory.update_priorities(priorities['indexes'],
                                           new_priorities)
-            loss = torch.mean(losses * priorities['weights'])
+            td_loss = torch.mean(q_loss * priorities['weights'])
         else:
-            loss = torch.mean(losses)
-        summary_scalar('Loss/TDLoss', loss.item())
-        return loss
+            td_loss = torch.mean(q_loss)
 
-    def save(self, path):
-        self.approximator.save(str(path) + ".pth")
-
-    def load(self, path):
-        self.approximator.load(str(path) + ".pth", eval_only=True)
+        summary_scalar('Loss/TDLoss', td_loss.item())
+        self.approximator.update(td_loss)
 
 
 # TODO: update for PrioritizedReplayBuffer
