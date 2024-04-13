@@ -15,7 +15,7 @@ from pathlib import Path
 # from uav_navigation.agent import DDQNAgent, QFunction
 # from uav_navigation.net import QNetwork, QFeaturesNetwork
 # from uav_navigation.agent import profile_q_approximator
-from uav_navigation.sac.srl import SRLSACAgent, SRLFunction
+from uav_navigation.sac.srl import SRLSACAgent, SRLSACFunction
 # from uav_navigation.srl.net import q_function
 from uav_navigation.sac.srl import profile_srl_approximator
 from uav_navigation.utils import load_json_dict
@@ -67,13 +67,27 @@ def parse_args():
     return args
 
 
+def action_str2array(action_str):
+    numbers = action_str.split()
+    if numbers[0] == '[':
+        numbers = numbers[1:]
+    if numbers[-1] == ']':
+        numbers = numbers[:-1]
+    daction = " ".join(numbers)
+    daction = daction.replace('[', '').replace(']', '')
+    # if len(numbers) == 3:
+    #     daction += ' 0.'
+    action_array = np.fromstring(daction, dtype=np.float32, sep=' ')
+    return action_array
+
+
 def run_evaluation(seed_val, logpath, episode):
     torch.manual_seed(seed_val)
     np.random.seed(seed_val)
 
     # Define constants
     logpath = Path(logpath)
-    agent_paths = [lp.name[:12] for lp in logpath.glob('**/agent_ep_*_q*')]
+    agent_paths = [lp.name[:12] for lp in logpath.glob('**/agent_ep_*_actor_critic*')]
     agent_paths.sort()
     episode = episode - 1
 
@@ -127,9 +141,12 @@ def run_evaluation(seed_val, logpath, episode):
     # Agent params
     agent_params = load_json_dict(logpath / 'args_agent.json')
     approximator_params = agent_params['approximator']
+    approximator_params['actor_max_a'] = action_str2array(approximator_params['actor_max_a'])
+    approximator_params['actor_min_a'] = action_str2array(approximator_params['actor_min_a'])
+
     if agent_params['is_srl']:
         agent_class = SRLSACAgent
-        q_approximator = SRLFunction
+        q_approximator = SRLSACFunction
         function_profiler = profile_srl_approximator
         # approximator_params['q_app_fn'] = q_function
         del agent_params['is_srl']
@@ -145,7 +162,7 @@ def run_evaluation(seed_val, logpath, episode):
     print('action_shape', agent_params['action_shape'])
     # Profile the approximation function computational costs
     approximation_function = q_approximator(**approximator_params)
-    approximation_function.append_models(agent_params['ae_models'])
+    approximation_function.append_autoencoders(agent_params['ae_models'])
     print('====== Full model computational demands ======')
     function_profiler(approximation_function, agent_params['state_shape'],
                       agent_params['action_shape'])
@@ -173,8 +190,7 @@ def run_evaluation(seed_val, logpath, episode):
             logpath / f"history_eval_{log_ep+1:03d}.csv")
         store_callback._ep = log_ep
         for fc in target_pos:
-            evaluate_agent(agent, env, training_params['eval_epsilon'],
-                           args.eval_steps,
+            evaluate_agent(agent, env, args.eval_steps, False,
                            fire_cuadrant=fc,
                            step_callback=store_callback)
 

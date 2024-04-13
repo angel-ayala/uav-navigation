@@ -253,7 +253,8 @@ class RGBModel(AEModel):
             num_layers=model_params['num_layers'],
             num_filters=model_params['num_filters'])
         self.encoder.append(rgb_encoder)
-        self.decoder.append(rgb_decoder)
+        if not encoder_only:
+            self.decoder.append(rgb_decoder)
         self.avg_encoder = optim.swa_utils.AveragedModel(self.encoder[0])
 
     def encoder_optim_step(self):

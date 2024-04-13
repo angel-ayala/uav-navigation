@@ -80,7 +80,7 @@ def parse_args():
                            'https://proceedings.mlr.press/v119/bengio20a.html )')
     arg_agent.add_argument("--approximator-beta", type=float, default=0.9,
                            help='Q approximation function Adam \beta.')
-    arg_agent.add_argument("--approximator-tau", type=float, default=0.1,
+    arg_agent.add_argument("--approximator-tau", type=float, default=0.995,
                            help='Soft target update \tau.')
     arg_agent.add_argument("--discount-factor", type=float, default=0.99,
                            help='Discount factor \gamma.')
@@ -327,8 +327,8 @@ if __name__ == '__main__':
         training_steps=args.steps,
         mem_steps=args.memory_steps,
         eval_interval=args.eval_interval,
-        eval_epsilon=args.eval_epsilon,
         eval_steps=args.eval_steps,
+        eval_epsilon=args.eval_epsilon,
         outpath=outfolder)
     # update data for log output
     run_params_save = run_params.copy()

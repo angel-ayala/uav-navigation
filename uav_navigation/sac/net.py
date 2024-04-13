@@ -46,15 +46,22 @@ def weight_init(m):
 
 class Actor(nn.Module):
     """MLP actor network."""
-    def __init__(self, latent_dim, action_shape, hidden_dim, log_std_min, log_std_max):
+    def __init__(self, latent_dim, action_shape, hidden_dim, min_a, max_a,
+                 log_std_min, log_std_max):
         super().__init__()
 
         self.log_std_min = log_std_min
         self.log_std_max = log_std_max
+        self.delta_a = 0.5 * (max_a - min_a)
+        self.central_a = 0.5 * (max_a + min_a)
+        self.limits = torch.tensor(min_a), torch.tensor(max_a)
 
         self.trunk = nn.Sequential(
-            nn.Linear(latent_dim, hidden_dim), nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
+            nn.Linear(latent_dim, hidden_dim), nn.SiLU(),
+            nn.Dropout1d(0.2),
+            nn.Linear(hidden_dim, hidden_dim // 2), 
+            nn.Linear(hidden_dim // 2, hidden_dim), nn.SiLU(),
+            nn.Dropout1d(0.5),
             nn.Linear(hidden_dim, 2 * action_shape[0])
         )
 
@@ -67,6 +74,12 @@ class Actor(nn.Module):
         log_std = torch.tanh(log_std)
         log_std = self.log_std_min +\
             0.5 * (self.log_std_max - self.log_std_min) * (log_std + 1)
+        
+        # Instanciate the policy distribution
+        # taken from https://github.com/MushroomRL/mushroom-rl/blob/dev/mushroom_rl/algorithms/actor_critic/deep_actor_critic/sac.py
+        p_dist = torch.distributions.Normal(mu, log_std.exp())
+        mu = p_dist.rsample()
+        log_std = p_dist.log_prob(mu)
 
         if compute_pi:
             std = log_std.exp()
@@ -81,6 +94,7 @@ class Actor(nn.Module):
             log_pi = None
 
         mu, pi, log_pi = squash(mu, pi, log_pi)
+        mu = mu.detach() * self.delta_a + self.central_a
 
         return mu, pi, log_pi, log_std
 
@@ -91,8 +105,11 @@ class QFunction(nn.Module):
         super().__init__()
 
         self.trunk = nn.Sequential(
-            nn.Linear(obs_dim + action_dim, hidden_dim), nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
+            nn.Linear(obs_dim + action_dim, hidden_dim), nn.SiLU(),
+            nn.Dropout1d(0.2),
+            nn.Linear(hidden_dim, hidden_dim // 2),  # nn.ReLU(),
+            nn.Linear(hidden_dim // 2, hidden_dim), nn.SiLU(),
+            nn.Dropout1d(0.5),
             nn.Linear(hidden_dim, 1)
         )
 
@@ -102,21 +119,6 @@ class QFunction(nn.Module):
         obs_action = torch.cat([obs, action], dim=1)
         return self.trunk(obs_action)
 
-class VFunction(nn.Module):
-    """MLP for state-value function."""
-    def __init__(self, obs_dim, hidden_dim):
-        super().__init__()
-
-        self.trunk = nn.Sequential(
-            nn.Linear(obs_dim, hidden_dim), nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
-            nn.Linear(hidden_dim, 1)
-        )
-
-    def forward(self, obs):
-        assert obs.size(0)
-
-        return self.trunk(obs)
 
 class Critic(nn.Module):
     """Critic network, employes two q-functions."""

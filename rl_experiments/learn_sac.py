@@ -149,8 +149,6 @@ def parse_args():
                               help='Steps interval for target network update.')
     arg_training.add_argument('--eval-interval', type=int, default=9000,  # 30m at 25 frames
                               help='Steps interval for progress evaluation.')
-    arg_training.add_argument('--eval-epsilon', type=float, default=0.01,
-                              help='Epsilon value used for evaluation.')
     arg_training.add_argument('--eval-steps', type=int, default=300,  # 1m at 25 frames
                               help='Number of evaluation steps.')
 
@@ -239,7 +237,8 @@ if __name__ == '__main__':
         alpha_beta=0.5,
         actor_lr=1e-3,
         actor_beta=0.9,
-        actor_log_std_min=-10,
+        actor_min_a=env.action_space.low,
+        actor_max_a=env.action_space.high,
         actor_log_std_max=2,
         actor_update_freq=args.actor_freq,
         critic_lr=args.approximator_lr,
@@ -343,8 +342,8 @@ if __name__ == '__main__':
         training_steps=args.steps,
         mem_steps=args.memory_steps,
         eval_interval=args.eval_interval,
-        eval_epsilon=args.eval_epsilon,
         eval_steps=args.eval_steps,
+        eval_epsilon=False,
         outpath=outfolder)
     # update data for log output
     run_params_save = run_params.copy()

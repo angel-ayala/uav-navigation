@@ -94,7 +94,7 @@ def format_obs(observation, is_pixels=False):
 
 
 def run_agent(agent, env, training_steps, mem_steps, eval_interval,
-              eval_epsilon, eval_steps, outpath, step_callback=None):
+              eval_steps, eval_epsilon, outpath, step_callback=None):
     summary_create(outpath / 'logs')
     ended = True
     total_reward = 0
@@ -154,7 +154,7 @@ def run_agent(agent, env, training_steps, mem_steps, eval_interval,
             if eval_steps > 0:
                 for fc in range(4):
                     e_reward, e_steps, e_time = evaluate_agent(
-                        agent, env, eval_epsilon, eval_steps, fire_cuadrant=fc,
+                        agent, env, eval_steps, eval_epsilon, fire_cuadrant=fc,
                         step_callback=step_callback)
                     summary().add_scalar(f"Evaluation/EpRewardC{fc}", e_reward, total_episodes)
                     summary().add_scalar(f"Evaluation/EpNumberStepsC{fc}", e_steps, total_episodes)
@@ -176,14 +176,15 @@ def run_agent(agent, env, training_steps, mem_steps, eval_interval,
     return total_reward, total_episodes
 
 
-def evaluate_agent(agent, env, eval_epsilon, eval_steps, fire_cuadrant=2, step_callback=None):
+def evaluate_agent(agent, env, eval_steps, eval_epsilon=False, fire_cuadrant=2, step_callback=None):
     timemark = time.time()
     state, info = env.reset(fire_cuadrant=fire_cuadrant)
     ep_reward = 0
     ep_steps = 0
     end = False
-    curr_epsilon = agent.epsilon
-    agent.epsilon = eval_epsilon
+    if eval_epsilon:
+        curr_epsilon = agent.epsilon
+        agent.epsilon = eval_epsilon
 
     if step_callback:
         step_callback.set_init_state(state, info)
@@ -204,5 +205,6 @@ def evaluate_agent(agent, env, eval_epsilon, eval_steps, fire_cuadrant=2, step_c
     sys.stdout.flush()
     sys.stdout.write(f"\r- Evaluation: {elapsed_time:.3f} seconds\tR: {ep_reward:.4f}\tS: {ep_steps}\n")
     sys.stdout.flush()
-    agent.epsilon = curr_epsilon
+    if eval_epsilon:
+        agent.epsilon = curr_epsilon
     return ep_reward, ep_steps, elapsed_time
