@@ -80,7 +80,7 @@ def parse_args():
                            'https://proceedings.mlr.press/v119/bengio20a.html )')
     arg_agent.add_argument("--approximator-beta", type=float, default=0.9,
                            help='Q approximation function Adam \beta.')
-    arg_agent.add_argument("--approximator-tau", type=float, default=0.995,
+    arg_agent.add_argument("--approximator-tau", type=float, default=0.1,
                            help='Soft target update \tau.')
     arg_agent.add_argument("--discount-factor", type=float, default=0.99,
                            help='Discount factor \gamma.')

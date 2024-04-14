@@ -71,24 +71,14 @@ def parse_args():
                          help='Whether if add the target info to vector state.')
 
     arg_agent = parser.add_argument_group('Agent')
-    arg_agent.add_argument("--approximator-lr", type=float, default=10e-5,
-                           help='Q approximation function SGD learning rate.'
-                           'default value is recommended in: '
-                           '[Interference and Generalization in Temporal '
-                           'Difference Learning]('
-                           'https://proceedings.mlr.press/v119/bengio20a.html )')
-    arg_agent.add_argument("--approximator-beta", type=float, default=0.9,
+    arg_agent.add_argument("--critic-lr", type=float, default=1e-3,
+                           help='Critic function Adam learning rate.')
+    arg_agent.add_argument("--critic-beta", type=float, default=0.9,
                            help='Q approximation function Adam \beta.')
-    arg_agent.add_argument("--approximator-tau", type=float, default=0.995,
+    arg_agent.add_argument("--critic-tau", type=float, default=0.01,
                            help='Soft target update \tau.')
     arg_agent.add_argument("--discount-factor", type=float, default=0.99,
                            help='Discount factor \gamma.')
-    arg_agent.add_argument("--epsilon-start", type=float, default=1.0,
-                           help='Initial epsilon value for exploration.')
-    arg_agent.add_argument("--epsilon-end", type=float, default=0.01,
-                           help='Final epsilon value for exploration.')
-    arg_agent.add_argument("--epsilon-steps", type=int, default=90000,  # 5h at 25 frames
-                           help='Number of steps to reach minimum value for Epsilon.')
     arg_agent.add_argument("--memory-capacity", type=int, default=65536,  # 2**16
                            help='Maximum number of transitions in the Experience replay buffer.')
     arg_agent.add_argument("--memory-prioritized", action='store_true',
@@ -115,7 +105,7 @@ def parse_args():
                          help='Number of hidden layers.')
     arg_srl.add_argument("--encoder-lr", type=float, default=1e-3,
                          help='Encoder function SGD learning rate.')
-    arg_srl.add_argument("--encoder-tau", type=float, default=0.995,
+    arg_srl.add_argument("--encoder-tau", type=float, default=0.05,
                          help='Encoder \tau polyak update.')
     arg_srl.add_argument("--decoder-lr", type=float, default=1e-3,
                          help='Decoder function SGD learning rate.')
@@ -145,7 +135,7 @@ def parse_args():
                               help='Steps interval for Q-network batch training.')
     arg_training.add_argument("--reconstruct-freq", type=int, default=1,
                               help='Steps interval for AE batch training.')
-    arg_training.add_argument("--critic-target-freq", type=int, default=1500,  # 5m at 25 frames
+    arg_training.add_argument("--critic-target-freq", type=int, default=2,  # 5m at 25 frames
                               help='Steps interval for target network update.')
     arg_training.add_argument('--eval-interval', type=int, default=9000,  # 30m at 25 frames
                               help='Steps interval for progress evaluation.')
@@ -232,18 +222,19 @@ if __name__ == '__main__':
         latent_dim=args.latent_dim,
         action_shape=agent_params['action_shape'],
         hidden_dim=args.hidden_dim,
-        init_temperature=0.1,
-        alpha_lr=1e-4,
-        alpha_beta=0.5,
+        init_temperature=0.01,
+        alpha_lr=1e-3,
+        alpha_beta=0.9,
         actor_lr=1e-3,
         actor_beta=0.9,
         actor_min_a=env.action_space.low,
         actor_max_a=env.action_space.high,
+        actor_log_std_min=-10,
         actor_log_std_max=2,
         actor_update_freq=args.actor_freq,
-        critic_lr=args.approximator_lr,
+        critic_lr=args.critic_lr,
         critic_beta=0.9,
-        critic_tau=args.approximator_tau, # 0.005,
+        critic_tau=args.critic_tau, # 0.005,
         critic_target_update_freq=args.critic_target_freq,
         use_cuda=args.use_cuda,
         is_pixels=args.is_pixels,

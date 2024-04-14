@@ -86,8 +86,8 @@ class ACFunction(GenericFunction):
         # Initialize target network with Q-network parameters
         self.critic_target.load_state_dict(self.critic.state_dict())
 
-        self.log_alpha = torch.tensor(np.log(init_temperature)).to(self.device)
-        self.log_alpha.requires_grad = True
+        self.log_alpha = torch.tensor(0., dtype=torch.float32,
+                                      requires_grad=True).to(self.device)
         # set target entropy to -|A|
         self.target_entropy = -np.prod(action_shape)
 
@@ -112,7 +112,7 @@ class ACFunction(GenericFunction):
         return self.actor(
             obs, compute_pi=compute_pi, compute_log_pi=compute_log_pi
         )
-    
+
     def compute_td_error(self, obs, action, reward, alpha):
         with torch.no_grad():
             _, policy_action, log_pi, _ = self.actor(obs)
@@ -128,7 +128,7 @@ class ACFunction(GenericFunction):
         soft_update_params(net=self.critic,
                            target_net=self.critic_target,
                            tau=self.critic_tau)
-        
+
 
     def update_critic(self, discount, obs, action, reward, next_obs, not_done, weight=None):
         with torch.no_grad():
@@ -162,14 +162,8 @@ class ACFunction(GenericFunction):
 
         entropy = 0.5 * log_std.shape[1] * (1.0 + np.log(2 * np.pi)
                                             ) + log_std.sum(dim=-1)
-        summary_scalar('Loss/Entropy', entropy.mean())
+        summary_scalar('Loss/Entropy', entropy.mean().item())
 
-        alpha_loss = -(self.alpha * (log_pi + self.target_entropy).detach()).mean()
-        summary_scalar('Loss/Alpha', alpha_loss.item())
-        self.log_alpha_optimizer.zero_grad()
-        alpha_loss.backward()
-        self.log_alpha_optimizer.step()
-        
         actor_Q = torch.min(actor_Q1, actor_Q2)
         actor_loss = self.alpha.detach() * log_pi - actor_Q.detach()
         if weight is not None:
@@ -177,10 +171,16 @@ class ACFunction(GenericFunction):
         else:
             actor_loss = actor_loss.mean()
         summary_scalar('Loss/Actor', actor_loss.item())
-        
+
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
         self.actor_optimizer.step()
+
+        alpha_loss = -(self.alpha * (log_pi.detach() + self.target_entropy)).mean()
+        summary_scalar('Loss/Alpha', alpha_loss.item())
+        self.log_alpha_optimizer.zero_grad()
+        alpha_loss.backward()
+        self.log_alpha_optimizer.step()
 
     def save(self, path):
         ac_app_path = str(path) + "_actor_critic.pth"
@@ -252,7 +252,7 @@ class SACAgent(GenericAgent):
 
         if step % self.approximator.actor_update_freq == 0:
             self.approximator.update_actor_and_alpha(obs, weight=loss_weights)
-        
+
         if self.is_prioritized:
             # https://link.springer.com/article/10.1007/s11370-024-00514-9
             td_errors = self.approximator.compute_td_error(

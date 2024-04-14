@@ -15,7 +15,7 @@ from pathlib import Path
 from uav_navigation.agent import DDQNAgent, QFunction
 from uav_navigation.net import QNetwork, QFeaturesNetwork
 from uav_navigation.agent import profile_q_approximator
-from uav_navigation.srl.agent import SRLDDQNAgent, SRLFunction
+from uav_navigation.srl.agent import SRLDDQNAgent, SRLQFunction
 from uav_navigation.srl.net import q_function
 from uav_navigation.srl.agent import profile_srl_approximator
 from uav_navigation.utils import load_json_dict
@@ -126,7 +126,7 @@ def run_evaluation(seed_val, logpath, episode):
     approximator_params = agent_params['approximator']
     if agent_params['is_srl']:
         agent_class = SRLDDQNAgent
-        q_approximator = SRLFunction
+        q_approximator = SRLQFunction
         function_profiler = profile_srl_approximator
         approximator_params['q_app_fn'] = q_function
         del agent_params['is_srl']
@@ -141,7 +141,7 @@ def run_evaluation(seed_val, logpath, episode):
     print('action_shape', agent_params['action_shape'])
     # Profile the approximation function computational costs
     approximation_function = q_approximator(**approximator_params)
-    approximation_function.append_models(agent_params['ae_models'])
+    approximation_function.append_autoencoders(agent_params['ae_models'])
     print('====== Full model computational demands ======')
     function_profiler(approximation_function, agent_params['state_shape'],
                       agent_params['action_shape'])

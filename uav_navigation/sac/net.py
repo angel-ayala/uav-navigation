@@ -52,8 +52,8 @@ class Actor(nn.Module):
 
         self.log_std_min = log_std_min
         self.log_std_max = log_std_max
-        self.delta_a = 0.5 * (max_a - min_a)
-        self.central_a = 0.5 * (max_a + min_a)
+        self.delta_a = torch.tensor(0.5 * (max_a - min_a))
+        self.central_a = torch.tensor(0.5 * (max_a + min_a))
         self.limits = torch.tensor(min_a), torch.tensor(max_a)
 
         self.trunk = nn.Sequential(
@@ -74,27 +74,24 @@ class Actor(nn.Module):
         log_std = torch.tanh(log_std)
         log_std = self.log_std_min +\
             0.5 * (self.log_std_max - self.log_std_min) * (log_std + 1)
-        
+
         # Instanciate the policy distribution
-        # taken from https://github.com/MushroomRL/mushroom-rl/blob/dev/mushroom_rl/algorithms/actor_critic/deep_actor_critic/sac.py
+        # based on https://github.com/MushroomRL/mushroom-rl/blob/dev/mushroom_rl/algorithms/actor_critic/deep_actor_critic/sac.py
         p_dist = torch.distributions.Normal(mu, log_std.exp())
-        mu = p_dist.rsample()
-        log_std = p_dist.log_prob(mu)
+        mu_raw = p_dist.rsample()
 
         if compute_pi:
-            std = log_std.exp()
-            noise = torch.randn_like(mu)
-            pi = mu + noise * std
+            pi = torch.tanh(mu_raw)
         else:
             pi = None
 
         if compute_log_pi:
-            log_pi = gaussian_logprob(noise, log_std)
+            log_pi = p_dist.log_prob(mu_raw).sum(dim=1, keepdim=True)
+            log_pi -= torch.log(1. - pi.pow(2) + 1e-6).sum(dim=1, keepdim=True)
         else:
             log_pi = None
 
-        mu, pi, log_pi = squash(mu, pi, log_pi)
-        mu = mu.detach() * self.delta_a + self.central_a
+        mu = torch.tanh(mu_raw) * self.delta_a + self.central_a
 
         return mu, pi, log_pi, log_std
 
