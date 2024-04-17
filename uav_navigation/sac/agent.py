@@ -87,8 +87,8 @@ class ACFunction(GenericFunction):
         # Initialize target network with Q-network parameters
         self.critic_target.load_state_dict(self.critic.state_dict())
 
-        self.log_alpha = torch.tensor(0., dtype=torch.float32,
-                                      requires_grad=True).to(self.device)
+        self.log_alpha = torch.tensor(0., dtype=torch.float32).to(self.device)
+        self.log_alpha.requires_grad = True
         # set target entropy to -|A|
         self.target_entropy = -np.prod(action_shape)
 
