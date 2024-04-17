@@ -18,7 +18,6 @@ from ..utils import soft_update_params
 # from ..utils import obs2tensor
 # from ..memory import is_prioritized_memory
 from ..logger import summary_scalar
-from .net import Actor
 from .net import DiagGaussianActor
 from .net import Critic
 
@@ -112,9 +111,9 @@ class ACFunction(GenericFunction):
     def action_inference(self, obs, sample=False):
         dist = self.actor(obs)
         action = dist.sample() if sample else dist.mean
-        action = action.clamp(*self.action_range)
+        action = action.cpu().clamp(*self.action_range)
         assert action.ndim == 2 and action.shape[0] == 1
-        return action[0].cpu().detach().numpy()
+        return action[0].detach().numpy()
 
     def update_critic_target(self):
         # Soft update the target network
