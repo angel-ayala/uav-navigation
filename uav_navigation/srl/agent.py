@@ -23,6 +23,7 @@ from .net import PositionBelief
 from .net import OrientationBelief
 # from .autoencoder import AEModel
 from .autoencoder import RGBModel
+from .autoencoder import VectorModel
 from .autoencoder import ATCModel
 from .autoencoder import ATCRGBModel
 from .autoencoder import profile_ae_model
@@ -78,6 +79,8 @@ class SRLFunction:
             # RGB observation reconstruction autoencoder model
             if m =='RGB':
                 ae_model = RGBModel(m_params)
+            if m =='Vector':
+                ae_model = VectorModel(m_params)
             if m =='ATC':
                 ae_model = ATCModel(m_params)
             if m =='ATC-RGB':
@@ -100,7 +103,7 @@ class SRLFunction:
             if latent_types is None or m.type in latent_types:
                 if any(t in m.type for t in ['RGB', 'ATC']):
                     z = m.encode_obs(obs_2d.to(self.device))
-                if any(t in m.type for t in ['VECTOR', 'imu2pose']):
+                if any(t in m.type for t in ['Vector', 'imu2pose']):
                     z = m.encode_obs(obs_1d.to(self.device))
                 if z.dim() == 1:
                     z = z.unsqueeze(0)
@@ -129,7 +132,7 @@ class SRLFunction:
                 loss = ae_model.compute_loss(obs_2d_augm, obs_2d_t1_augm)
             if "RGB" in ae_model.type:
                 loss = ae_model.compute_loss(obs_2d, obs_2d_augm, self.decoder_latent_lambda)
-            if "VECTOR" in ae_model.type:
+            if "Vector" in ae_model.type:
                 loss = ae_model.compute_loss(obs_1d, obs_1d, self.decoder_latent_lambda)
             total_loss.append(loss)
         tloss = torch.sum(torch.stack(total_loss))
@@ -216,6 +219,8 @@ class SRLFunction:
         for i, (m, m_params) in enumerate(ae_models.items()):
             if m =='RGB':
                 ae_model = RGBModel(m_params, encoder_only=encoder_only)
+            if m =='Vector':
+                ae_model = VectorModel(m_params, encoder_only=encoder_only)
             if m =='ATC':
                 ae_model = ATCModel(m_params, encoder_only=encoder_only)
             if m =='ATC-RGB':

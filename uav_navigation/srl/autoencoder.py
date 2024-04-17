@@ -20,7 +20,7 @@ from .net import preprocess_obs
 from .net import rgb_reconstruction_model
 from .net import PixelDecoder
 from .net import PixelMDPEncoder
-# from .net import vector_reconstruction_model
+from .net import vector_reconstruction_model
 # from .net import imu2pose_model
 # from .net import slowness_cost
 # from .net import variability_cost
@@ -198,22 +198,26 @@ class AEModel:
         summary_scalar(f'Loss/{self.type}/S+V+P+R', state_priors_loss.item())
         return state_priors_loss        
 
-    def compute_reconstruction_loss(self, obs, obs_augm, decoder_latent_lambda):
+    def compute_reconstruction_loss(self, obs, obs_augm, decoder_latent_lambda, pixel_obs_log=False):
+        # print('AEModel obs', obs.shape, obs.min(), obs.max())
         rec_obs, h = self.reconstruct_obs(obs_augm)
+        
+        if len(obs.shape) == 3:
+            # [-1, 1] -> [-0.5, 0.5]
+            true_obs = obs
+            output_obs = rec_obs
 
-        # preprocess images to be in [-0.5, 0.5] range
-        target_obs = preprocess_obs(obs)
-        # de-stack
-        obs_shape = obs.shape
-        n_stack = obs_shape[1] // 3
-        r_shape = (obs_shape[0] * n_stack, 3) + obs_shape[-2:]
-        # target_obs = target_obs.reshape((target_obs.shape[0] * 3, 3, target_obs.shape[-2], target_obs.shape[-1]))
-        # rec_obs = rec_obs.reshape((rec_obs.shape[0] * 3, 3, rec_obs.shape[-2], rec_obs.shape[-1]))
-        target_obs = target_obs.reshape(r_shape)
-        output_obs = rec_obs.reshape(r_shape)
-        # rec_obs = torch.clip(rec_obs, -1, 1) * 0.5
+        if len(obs.shape) == 4:
+            # preprocess images to be in [-0.5, 0.5] range
+            true_obs = preprocess_obs(obs)
+            # de-stack
+            obs_shape = obs.shape
+            n_stack = obs_shape[1] // 3
+            r_shape = (obs_shape[0] * n_stack, 3) + obs_shape[-2:]
+            true_obs = true_obs.reshape(r_shape)
+            output_obs = rec_obs.reshape(r_shape)
 
-        rec_loss = F.mse_loss(target_obs, output_obs) #* 10
+        rec_loss = F.mse_loss(true_obs, output_obs) #* 10
         summary_scalar(f'Loss/Reconstruction/{self.type}/MSE', rec_loss.item())
         # bce_loss = F.binary_cross_entropy(rec_obs + 0.5, target_obs + 0.5)
         # summary_scalar(f'Loss/Reconstruction/{self.type}/BCE', bce_loss.item())
@@ -233,9 +237,9 @@ class AEModel:
         summary_scalar(f'Loss/Encoder/{self.type}/L2', latent_loss.item())
 
         rloss = rec_loss + decoder_latent_lambda * latent_loss
-        summary_scalar(f'Loss/Reconstruction/{self.type}', rloss.item())
+        # summary_scalar(f'Loss/Reconstruction/{self.type}', rloss.item())
 
-        if self.n_calls % self.LOG_FREQ == 0:
+        if pixel_obs_log:
             log_image_batch(obs, "Agent/observation")
             log_image_batch(obs_augm, "Agent/observation_augm")
             log_image_batch(rec_obs + 0.5, "Agent/reconstruction")
@@ -255,13 +259,36 @@ class RGBModel(AEModel):
         self.encoder.append(rgb_encoder)
         if not encoder_only:
             self.decoder.append(rgb_decoder)
-        self.avg_encoder = optim.swa_utils.AveragedModel(self.encoder[0])
+        # self.avg_encoder = optim.swa_utils.AveragedModel(self.encoder[0])
 
     def encoder_optim_step(self):
         super().encoder_optim_step()
-        self.avg_encoder.update_parameters(self.encoder[0])
+        # self.avg_encoder.update_parameters(self.encoder[0])
 
     def compute_loss(self, obs, obs_augm, decoder_latent_lambda):
+        return self.compute_reconstruction_loss(obs, obs_augm, decoder_latent_lambda,
+                                                pixel_obs_log=self.n_calls % self.LOG_FREQ == 0)
+
+
+class VectorModel(AEModel):
+    def __init__(self, model_params, encoder_only=False):
+        super(VectorModel, self).__init__('Vector')
+        vector_encoder, vector_decoder = vector_reconstruction_model(
+            model_params['vector_shape'],
+            model_params['hidden_dim'],
+            model_params['latent_dim'],
+            num_layers=model_params['num_layers'])
+        self.encoder.append(vector_encoder)
+        if not encoder_only:
+            self.decoder.append(vector_decoder)
+        # self.avg_encoder = optim.swa_utils.AveragedModel(self.encoder[0])
+
+    def encoder_optim_step(self):
+        super().encoder_optim_step()
+        # self.avg_encoder.update_parameters(self.encoder[0])
+
+    def compute_loss(self, obs, obs_augm, decoder_latent_lambda):
+        # TODO: process each variable grouply or elementwise?
         return self.compute_reconstruction_loss(obs, obs_augm, decoder_latent_lambda)
 
 

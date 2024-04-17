@@ -71,11 +71,11 @@ def parse_args():
                          help='Whether if add the target info to vector state.')
 
     arg_agent = parser.add_argument_group('Agent')
-    arg_agent.add_argument("--critic-lr", type=float, default=1e-3,
+    arg_agent.add_argument("--critic-lr", type=float, default=1e-4,
                            help='Critic function Adam learning rate.')
     arg_agent.add_argument("--critic-beta", type=float, default=0.9,
                            help='Q approximation function Adam \beta.')
-    arg_agent.add_argument("--critic-tau", type=float, default=0.01,
+    arg_agent.add_argument("--critic-tau", type=float, default=0.005,
                            help='Soft target update \tau.')
     arg_agent.add_argument("--discount-factor", type=float, default=0.99,
                            help='Discount factor \gamma.')
@@ -131,7 +131,7 @@ def parse_args():
                               help='Number of training steps.')
     arg_training.add_argument('--memory-steps', type=int, default=2048,
                               help='Number of steps for initial population of the Experience replay buffer.')
-    arg_training.add_argument("--actor-freq", type=int, default=2,
+    arg_training.add_argument("--actor-freq", type=int, default=1,
                               help='Steps interval for Q-network batch training.')
     arg_training.add_argument("--reconstruct-freq", type=int, default=1,
                               help='Steps interval for AE batch training.')
@@ -223,9 +223,9 @@ if __name__ == '__main__':
         action_shape=agent_params['action_shape'],
         hidden_dim=args.hidden_dim,
         init_temperature=0.01,
-        alpha_lr=1e-3,
+        alpha_lr=1e-4,
         alpha_beta=0.9,
-        actor_lr=1e-3,
+        actor_lr=1e-4,
         actor_beta=0.9,
         actor_min_a=env.action_space.low,
         actor_max_a=env.action_space.high,
@@ -261,6 +261,15 @@ if __name__ == '__main__':
                                     encoder_lr=args.encoder_lr,
                                     decoder_lr=args.decoder_lr,
                                     decoder_weight_decay=args.decoder_weight_decay)
+        if args.model_vector:
+            vector_shape = agent_params['state_shape'][1] if is_multimodal else agent_params['state_shape']
+            ae_models['Vector'] = dict(vector_shape=vector_shape,
+                                    hidden_dim=args.hidden_dim,
+                                    latent_dim=args.latent_dim,
+                                    num_layers=args.num_layers,
+                                    encoder_lr=args.encoder_lr,
+                                    decoder_lr=args.decoder_lr,
+                                    decoder_weight_decay=args.decoder_weight_decay)
         if args.model_atc:
             image_shape = agent_params['state_shape'][0] if is_multimodal else agent_params['state_shape']
             ae_models['ATC'] = dict(image_shape=image_shape,
@@ -271,8 +280,7 @@ if __name__ == '__main__':
                                     decoder_lr=args.decoder_lr,
                                     decoder_weight_decay=args.decoder_weight_decay)
 
-        # approximator_params['q_app_params']['latent_dim'] *= len(
-        #     ae_models.keys())
+        approximator_params['latent_dim'] *= len(ae_models)
         agent_params['reconstruct_freq'] = args.reconstruct_freq
         agent_params['ae_models'] = ae_models
         agent_params['srl_loss'] = args.use_srl_loss

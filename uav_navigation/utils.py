@@ -87,7 +87,7 @@ def format_obs(observation, is_pixels=False):
 
     if len(observation.shape) == 3 and is_pixels:
         observation = observation.unsqueeze(0)
-    if len(observation.shape) == 1 and not is_pixels:
+    if len(observation.shape) <= 2 and not is_pixels:
         observation = observation.unsqueeze(0)
 
     return observation

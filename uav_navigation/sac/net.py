@@ -8,6 +8,7 @@ Created on Sun Nov 26 15:50:44 2023
 import numpy as np
 import torch
 import torch.nn as nn
+from torch import distributions as pyd
 from torch.nn import functional as F
 
 
@@ -44,56 +45,81 @@ def weight_init(m):
         nn.init.orthogonal_(m.weight.data[:, :, mid, mid], gain)
 
 
-class Actor(nn.Module):
-    """MLP actor network."""
-    def __init__(self, latent_dim, action_shape, hidden_dim, min_a, max_a,
-                 log_std_min, log_std_max):
+class TanhTransform(pyd.transforms.Transform):
+    domain = pyd.constraints.real
+    codomain = pyd.constraints.interval(-1.0, 1.0)
+    bijective = True
+    sign = +1
+
+    def __init__(self, cache_size=1):
+        super().__init__(cache_size=cache_size)
+
+    @staticmethod
+    def atanh(x):
+        return 0.5 * (x.log1p() - (-x).log1p())
+
+    def __eq__(self, other):
+        return isinstance(other, TanhTransform)
+
+    def _call(self, x):
+        return x.tanh()
+
+    def _inverse(self, y):
+        # We do not clamp to the boundary here as it may degrade the performance of certain algorithms.
+        # one should use `cache_size=1` instead
+        return self.atanh(y)
+
+    def log_abs_det_jacobian(self, x, y):
+        # We use a formula that is more numerically stable, see details in the following link
+        # https://github.com/tensorflow/probability/commit/ef6bb176e0ebd1cf6e25c6b5cecdd2428c22963f#diff-e120f70e92e6741bca649f04fcd907b7
+        return 2. * (np.log(2.) - x - F.softplus(-2. * x))
+
+
+class SquashedNormal(pyd.transformed_distribution.TransformedDistribution):
+    def __init__(self, loc, scale):
+        self.loc = loc
+        self.scale = scale
+
+        self.base_dist = pyd.Normal(loc, scale)
+        transforms = [TanhTransform()]
+        super().__init__(self.base_dist, transforms)
+
+    @property
+    def mean(self):
+        mu = self.loc
+        for tr in self.transforms:
+            mu = tr(mu)
+        return mu
+
+
+class DiagGaussianActor(nn.Module):
+    """torch.distributions implementation of an diagonal Gaussian policy.
+    taken from https://github.com/denisyarats/pytorch_sac/blob/master/agent/actor.py"""
+
+    def __init__(self, obs_dim, action_dim, hidden_dim, log_std_bounds):
         super().__init__()
 
-        self.log_std_min = log_std_min
-        self.log_std_max = log_std_max
-        self.delta_a = torch.tensor(0.5 * (max_a - min_a))
-        self.central_a = torch.tensor(0.5 * (max_a + min_a))
-        self.limits = torch.tensor(min_a), torch.tensor(max_a)
-
+        self.log_std_bounds = log_std_bounds
         self.trunk = nn.Sequential(
-            nn.Linear(latent_dim, hidden_dim), nn.SiLU(),
-            nn.Dropout1d(0.2),
-            nn.Linear(hidden_dim, hidden_dim // 2), 
-            nn.Linear(hidden_dim // 2, hidden_dim), nn.SiLU(),
-            nn.Dropout1d(0.5),
-            nn.Linear(hidden_dim, 2 * action_shape[0])
+            nn.Linear(obs_dim, hidden_dim), nn.ReLU(inplace=True),
+            nn.Linear(hidden_dim, hidden_dim),  nn.ReLU(inplace=True),
+            nn.Linear(hidden_dim, 2 * action_dim)
         )
 
         self.apply(weight_init)
 
-    def forward(self, obs, compute_pi=True, compute_log_pi=True):
+    def forward(self, obs):
         mu, log_std = self.trunk(obs).chunk(2, dim=-1)
 
         # constrain log_std inside [log_std_min, log_std_max]
         log_std = torch.tanh(log_std)
-        log_std = self.log_std_min +\
-            0.5 * (self.log_std_max - self.log_std_min) * (log_std + 1)
+        log_std_min, log_std_max = self.log_std_bounds
+        log_std = log_std_min + 0.5 * (log_std_max - log_std_min) * (log_std +
+                                                                     1)
+        std = log_std.exp()
 
-        # Instanciate the policy distribution
-        # based on https://github.com/MushroomRL/mushroom-rl/blob/dev/mushroom_rl/algorithms/actor_critic/deep_actor_critic/sac.py
-        p_dist = torch.distributions.Normal(mu, log_std.exp())
-        mu_raw = p_dist.rsample()
-
-        if compute_pi:
-            pi = torch.tanh(mu_raw)
-        else:
-            pi = None
-
-        if compute_log_pi:
-            log_pi = p_dist.log_prob(mu_raw).sum(dim=1, keepdim=True)
-            log_pi -= torch.log(1. - pi.pow(2) + 1e-6).sum(dim=1, keepdim=True)
-        else:
-            log_pi = None
-
-        mu = torch.tanh(mu_raw) * self.delta_a + self.central_a
-
-        return mu, pi, log_pi, log_std
+        dist = SquashedNormal(mu, std)
+        return dist
 
 
 class QFunction(nn.Module):
@@ -102,11 +128,8 @@ class QFunction(nn.Module):
         super().__init__()
 
         self.trunk = nn.Sequential(
-            nn.Linear(obs_dim + action_dim, hidden_dim), nn.SiLU(),
-            nn.Dropout1d(0.2),
-            nn.Linear(hidden_dim, hidden_dim // 2),  # nn.ReLU(),
-            nn.Linear(hidden_dim // 2, hidden_dim), nn.SiLU(),
-            nn.Dropout1d(0.5),
+            nn.Linear(obs_dim + action_dim, hidden_dim), nn.ReLU(inplace=True),
+            nn.Linear(hidden_dim, hidden_dim),  nn.ReLU(inplace=True),
             nn.Linear(hidden_dim, 1)
         )
 

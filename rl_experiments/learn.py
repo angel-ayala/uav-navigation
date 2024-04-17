@@ -255,6 +255,15 @@ if __name__ == '__main__':
                                     num_filters=args.num_filters,
                                     encoder_lr=args.encoder_lr,
                                     decoder_lr=args.decoder_lr,
+                                    decoder_weight_decay=args.decoder_weight_decay)        
+        if args.model_vector:
+            vector_shape = agent_params['state_shape'][1] if is_multimodal else agent_params['state_shape']
+            ae_models['Vector'] = dict(vector_shape=vector_shape,
+                                    hidden_dim=args.hidden_dim,
+                                    latent_dim=args.latent_dim,
+                                    num_layers=args.num_layers,
+                                    encoder_lr=args.encoder_lr,
+                                    decoder_lr=args.decoder_lr,
                                     decoder_weight_decay=args.decoder_weight_decay)
         if args.model_atc:
             image_shape = agent_params['state_shape'][0] if is_multimodal else agent_params['state_shape']

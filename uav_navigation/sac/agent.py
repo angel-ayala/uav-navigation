@@ -19,6 +19,7 @@ from ..utils import soft_update_params
 # from ..memory import is_prioritized_memory
 from ..logger import summary_scalar
 from .net import Actor
+from .net import DiagGaussianActor
 from .net import Critic
 
 
@@ -76,9 +77,9 @@ class ACFunction(GenericFunction):
         self.critic_target_update_freq = critic_target_update_freq
 
         # Q-networks
-        self.actor = Actor(latent_dim, action_shape, hidden_dim,
-                           actor_min_a, actor_max_a,
-                           actor_log_std_min, actor_log_std_max).to(self.device)
+        self.actor = DiagGaussianActor(latent_dim, action_shape[-1], hidden_dim,
+                                       log_std_bounds=[actor_log_std_min, actor_log_std_max]).to(self.device)
+        self.action_range = torch.tensor(actor_min_a), torch.tensor(actor_max_a)
 
         self.critic = Critic(latent_dim, action_shape, hidden_dim).to(self.device)
         self.critic_target = Critic(latent_dim, action_shape, hidden_dim).to(self.device)
@@ -108,20 +109,12 @@ class ACFunction(GenericFunction):
     def alpha(self):
         return self.log_alpha.exp()
 
-    def action_inference(self, obs, compute_pi=False, compute_log_pi=False):
-        return self.actor(
-            obs, compute_pi=compute_pi, compute_log_pi=compute_log_pi
-        )
-
-    def compute_td_error(self, obs, action, reward, alpha):
-        with torch.no_grad():
-            _, policy_action, log_pi, _ = self.actor(obs)
-            current_V = torch.min(*self.critic(obs, policy_action)) - self.alpha.detach() * log_pi
-            current_Q = torch.min(*self.critic(obs, action))
-        td_error = reward.unsqueeze(1) + alpha * current_V - current_Q
-        summary_scalar('Loss/TDError', td_error.mean().item())
-        return td_error
-
+    def action_inference(self, obs, sample=False):
+        dist = self.actor(obs)
+        action = dist.sample() if sample else dist.mean
+        action = action.clamp(*self.action_range)
+        assert action.ndim == 2 and action.shape[0] == 1
+        return action[0].cpu().detach().numpy()
 
     def update_critic_target(self):
         # Soft update the target network
@@ -129,11 +122,12 @@ class ACFunction(GenericFunction):
                            target_net=self.critic_target,
                            tau=self.critic_tau)
 
-
     def update_critic(self, discount, obs, action, reward, next_obs, not_done, weight=None):
         with torch.no_grad():
-            _, policy_action, log_pi, _ = self.actor(next_obs)
-            target_Q1, target_Q2 = self.critic_target(next_obs, policy_action)
+            dist = self.actor(next_obs)
+            next_action = dist.rsample()
+            log_pi = dist.log_prob(next_action).sum(-1, keepdim=True)
+            target_Q1, target_Q2 = self.critic_target(next_obs, next_action)
             target_V = torch.min(target_Q1, target_Q2) - self.alpha * log_pi
             target_Q = reward.unsqueeze(1) + discount * target_V * not_done.unsqueeze(1)
 
@@ -145,9 +139,12 @@ class ACFunction(GenericFunction):
             q_loss = (F.mse_loss(current_Q1, target_Q, reduction='none') +
                       F.mse_loss(current_Q2, target_Q, reduction='none'))
             critic_loss = (weight * q_loss.squeeze()).mean()
+            td_error = (current_Q1 - target_Q) + (current_Q2 - target_Q)
+            td_error = (td_error / 2.).detach()
         else:
             critic_loss = (F.mse_loss(current_Q1, target_Q) +
                            F.mse_loss(current_Q2, target_Q))
+            td_error = None
         summary_scalar('Loss/Critic', critic_loss.item())
 
         # Optimize the state-action function
@@ -155,14 +152,17 @@ class ACFunction(GenericFunction):
         critic_loss.backward()
         self.critic_optimizer.step()
 
+        return td_error
+
     def update_actor_and_alpha(self, obs, weight=None):
         # detach encoder, so we don't update it with the actor loss
-        _, pi, log_pi, log_std = self.actor(obs)
+        dist = self.actor(obs)
+        pi = dist.rsample()
+        log_pi = dist.log_prob(pi).sum(-1, keepdim=True)
         actor_Q1, actor_Q2 = self.critic(obs, pi)
 
-        entropy = 0.5 * log_std.shape[1] * (1.0 + np.log(2 * np.pi)
-                                            ) + log_std.sum(dim=-1)
-        summary_scalar('Loss/Entropy', entropy.mean().item())
+        entropy = -log_pi.mean()
+        summary_scalar('Loss/Entropy', entropy.item())
 
         actor_Q = torch.min(actor_Q1, actor_Q2)
         actor_loss = self.alpha.detach() * log_pi - actor_Q.detach()
@@ -176,7 +176,7 @@ class ACFunction(GenericFunction):
         actor_loss.backward()
         self.actor_optimizer.step()
 
-        alpha_loss = -(self.alpha * (log_pi.detach() + self.target_entropy)).mean()
+        alpha_loss = (self.alpha * (-log_pi.detach() - self.target_entropy)).mean()
         summary_scalar('Loss/Alpha', alpha_loss.item())
         self.log_alpha_optimizer.zero_grad()
         alpha_loss.backward()
@@ -221,21 +221,11 @@ class SACAgent(GenericAgent):
         if self.is_prioritized:
             self.memory.update_beta(0)
 
-    def select_action(self, state):
+    def select_action(self, state, sample=True):
         state = self.approximator.format_obs(state)
         with torch.no_grad():
-            mu, _, _, _ = self.approximator.action_inference(
-                state, compute_pi=False, compute_log_pi=False
-            )
-        return mu.cpu().data.numpy().flatten()
-
-    def sample_action(self, state):
-        state = self.approximator.format_obs(state)
-        with torch.no_grad():
-            _, pi, _, _ = self.approximator.action_inference(
-                state, compute_pi=True, compute_log_pi=False
-            )
-        return pi.cpu().data.numpy().flatten()
+            action = self.approximator.action_inference(state, sample=sample)
+        return action
 
     def update_sac(self, step):
         sampled_data = self.memory.sample(
@@ -247,18 +237,18 @@ class SACAgent(GenericAgent):
             obs, actions, rewards, obs_t1, dones = sampled_data
             loss_weights = None
 
-        self.approximator.update_critic(self.discount_factor, obs, actions,
-                                        rewards, obs_t1, 1 - dones, weight=loss_weights)
+        td_errors = self.approximator.update_critic(
+            self.discount_factor, obs, actions, rewards, obs_t1,
+            1 - dones, weight=loss_weights)
 
         if step % self.approximator.actor_update_freq == 0:
             self.approximator.update_actor_and_alpha(obs, weight=loss_weights)
 
         if self.is_prioritized:
             # https://link.springer.com/article/10.1007/s11370-024-00514-9
-            td_errors = self.approximator.compute_td_error(
-                obs, actions, rewards, self.memory.alpha)
-            new_priorities = td_errors.squeeze().detach().cpu().numpy()
+            new_priorities = td_errors.squeeze().cpu().numpy()
             new_priorities = np.abs(new_priorities) + 1e-6
+            summary_scalar('Loss/TDError', new_priorities.mean())
             self.memory.update_priorities(sampled_data[1]['indexes'],
                                           new_priorities)
 

@@ -101,10 +101,9 @@ class SRLSACFunction(ACFunction, SRLFunction):
         SRLFunction.__init__(self, decoder_latent_lambda)
         self.encoder_tau = encoder_tau
 
-    def action_inference(self, obs, compute_pi=False, compute_log_pi=False):
+    def action_inference(self, obs, sample=False):
         obs = self.compute_z(obs).detach()
-        return self.actor(obs, compute_pi=compute_pi,
-                          compute_log_pi=compute_log_pi)
+        return super().action_inference(obs, sample=sample)
     
     def compute_td_error(self, obs, action, reward, beta):
         obs = self.compute_z(obs).detach()
