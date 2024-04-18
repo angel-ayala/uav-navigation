@@ -14,8 +14,9 @@ import gym
 import datetime
 from pathlib import Path
 
+from uav_navigation.sac.agent import SACAgent, ACFunction
 from uav_navigation.sac.srl import SRLSACAgent, SRLSACFunction
-# from uav_navigation.srl.net import q_function
+from uav_navigation.net import QFeaturesNetwork
 from uav_navigation.memory import ReplayBuffer, PrioritizedReplayBuffer
 from uav_navigation.utils import save_dict_json, run_agent
 
@@ -206,14 +207,8 @@ if __name__ == '__main__':
     # Agent args
     agent_params = dict(
         state_shape=state_shape,
-        # action_shape=(env.action_space.n, ),
         action_shape=env.action_space.shape,
         discount_factor=args.discount_factor,
-        # epsilon_start=args.epsilon_start,
-        # epsilon_end=args.epsilon_end,
-        # epsilon_steps=args.epsilon_steps,
-        # train_freq=args.train_frequency,
-        # target_update_freq=args.target_update_frequency,
     )
 
     # Append SRL models
@@ -233,7 +228,7 @@ if __name__ == '__main__':
         actor_log_std_max=2,
         actor_update_freq=args.actor_freq,
         critic_lr=args.critic_lr,
-        critic_beta=0.9,
+        critic_beta=args.critic_beta,
         critic_tau=args.critic_tau, # 0.005,
         critic_target_update_freq=args.critic_target_freq,
         use_cuda=args.use_cuda,
@@ -243,14 +238,8 @@ if __name__ == '__main__':
 
     if args.is_srl:
         agent_class = SRLSACAgent
-        q_approximator = SRLSACFunction
+        policy = SRLSACFunction
         approximator_params['encoder_tau'] = args.encoder_tau
-        # approximator_params['q_app_fn'] = q_function
-        # approximator_params['q_app_params'] = dict(
-        #     latent_dim=args.latent_dim,
-        #     action_shape=agent_params['action_shape'],
-        #     hidden_dim=args.hidden_dim,
-        #     num_layers=args.num_layers)
 
         if args.model_rgb:
             image_shape = agent_params['state_shape'][0] if is_multimodal else agent_params['state_shape']
@@ -286,16 +275,16 @@ if __name__ == '__main__':
         agent_params['srl_loss'] = args.use_srl_loss
         agent_params['priors'] = args.use_priors
     else:
-        # agent_class = DDQNAgent
-        # q_approximator = QFunction
-        # approximator_params['q_app_fn'] = QFeaturesNetwork\
-        #     if args.is_pixels else QNetwork
-        # approximator_params['q_app_params'] = dict(
-        #     input_shape=agent_params['state_shape'],
-        #     output_shape=agent_params['action_shape'])
-        raise NotImplementedError('SAC with SRL implemented only')
+        agent_class = SACAgent
+        policy = ACFunction
+        if args.is_pixels:
+            approximator_params['preprocess'] = QFeaturesNetwork(
+                agent_params['state_shape'], agent_params['action_shape'], only_cnn=True)
+            approximator_params['latent_dim'] = approximator_params['preprocess'].feature_dim
+        else:
+            approximator_params['latent_dim'] = agent_params['state_shape']
     agent_params.update(
-        dict(approximator=q_approximator(**approximator_params)))
+        dict(approximator=policy(**approximator_params)))
 
     # Memory buffer args
     memory_params = dict(
@@ -307,11 +296,10 @@ if __name__ == '__main__':
     memory_class = ReplayBuffer
 
     if args.memory_prioritized:
-        # raise NotImplementedError('SAC with random experience replay only')
         memory_params.update(dict(
             alpha=args.prioritized_alpha,
             beta=args.prioritized_initial_beta,
-            beta_steps=args.steps // args.actor_freq
+            beta_steps=args.steps // args.critic_target_freq
         ))
         memory_class = PrioritizedReplayBuffer
 

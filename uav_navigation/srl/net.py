@@ -124,20 +124,19 @@ class VectorEncoder(MLP):
         super().__init__(state_shape[-1], latent_dim, hidden_dim,
                          num_layers=num_layers-1)
         if len(state_shape) == 2:
-            self.h_layers[0] = nn.Conv1d(state_shape[0], hidden_dim, kernel_size=3, padding=1)
-                                    # kernel_size=state_shape[-1])
-            self.h_layers.insert(1, nn.Conv1d(hidden_dim, hidden_dim, kernel_size=state_shape[-1]))
-        else:
-            self.h_layers[0] = nn.Linear(state_shape[-1], hidden_dim)
+            self.h_layers.insert(0, nn.Conv1d(state_shape[0], state_shape[-1],
+                                              kernel_size=state_shape[-1]))
         self.feature_dim = latent_dim
         self.ln = nn.LayerNorm(self.feature_dim)
 
     def forward(self, obs, detach=False):
         h = obs
         for hidden_layer in self.h_layers:
-            h = torch.relu(hidden_layer(h))
+            h = hidden_layer(h)
             if isinstance(hidden_layer, nn.Conv1d):
-                h = h.squeeze(2)
+                h = torch.tanh(h.squeeze(2))
+            else:
+                h = torch.relu(h)
         h_norm = self.ln(h)
         out = torch.tanh(h_norm)
         if detach:

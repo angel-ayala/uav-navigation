@@ -12,11 +12,10 @@ import numpy as np
 import torch
 from pathlib import Path
 
-# from uav_navigation.agent import DDQNAgent, QFunction
-# from uav_navigation.net import QNetwork, QFeaturesNetwork
-# from uav_navigation.agent import profile_q_approximator
+from uav_navigation.sac.agent import SACAgent, ACFunction
+from uav_navigation.sac.agent import profile_actor_critic
+from uav_navigation.net import QFeaturesNetwork
 from uav_navigation.sac.srl import SRLSACAgent, SRLSACFunction
-# from uav_navigation.srl.net import q_function
 from uav_navigation.sac.srl import profile_srl_approximator
 from uav_navigation.utils import load_json_dict
 from uav_navigation.utils import evaluate_agent
@@ -146,29 +145,33 @@ def run_evaluation(seed_val, logpath, episode):
 
     if agent_params['is_srl']:
         agent_class = SRLSACAgent
-        q_approximator = SRLSACFunction
+        policy = SRLSACFunction
         function_profiler = profile_srl_approximator
         # approximator_params['q_app_fn'] = q_function
         del agent_params['is_srl']
     else:
-    #     agent_class = DDQNAgent
-    #     q_approximator = QFunction
-    #     function_profiler = profile_q_approximator
-    #     approximator_params['q_app_fn'] = QFeaturesNetwork\
-    #         if env_params['is_pixels'] else QNetwork
-        raise NotImplementedError('SRL version only.')
+        agent_class = SACAgent
+        policy = ACFunction
+        function_profiler = profile_actor_critic
+        if env_params['is_pixels']:
+            approximator_params['preprocess'] = QFeaturesNetwork(
+                agent_params['state_shape'], agent_params['action_shape'], only_cnn=True)
+            approximator_params['latent_dim'] = approximator_params['preprocess'].n_features
+        else:
+            approximator_params['latent_dim'] = agent_params['state_shape']
 
     print('state_shape', agent_params['state_shape'])
     print('action_shape', agent_params['action_shape'])
     # Profile the approximation function computational costs
-    approximation_function = q_approximator(**approximator_params)
-    approximation_function.append_autoencoders(agent_params['ae_models'])
+    approximation_function = policy(**approximator_params)
+    if agent_params['is_srl']:
+        approximation_function.append_autoencoders(agent_params['ae_models'])
     print('====== Full model computational demands ======')
     function_profiler(approximation_function, agent_params['state_shape'],
                       agent_params['action_shape'])
     del approximation_function
     # Profile encoder stage only computational costs
-    approximation_function = q_approximator(**approximator_params)
+    approximation_function = policy(**approximator_params)
     print('\n====== Reduced inference-only computational demands ======')
     approximation_function.load(logpath / agent_paths[0],
                                 ae_models=agent_params['ae_models'],
@@ -177,7 +180,7 @@ def run_evaluation(seed_val, logpath, episode):
                       agent_params['action_shape'])
 
     # Instantiate an init evaluation
-    agent_params['approximator'] = q_approximator(**approximator_params)
+    agent_params['approximator'] = policy(**approximator_params)
     agent = agent_class(**agent_params)
     training_params = load_json_dict(logpath / 'args_training.json')
     for log_ep, agent_path in enumerate(agent_paths):

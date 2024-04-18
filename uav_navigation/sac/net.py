@@ -100,16 +100,34 @@ class DiagGaussianActor(nn.Module):
         super().__init__()
 
         self.log_std_bounds = log_std_bounds
+        hidden_dim1 = hidden_dim
+        if isinstance(obs_dim, int):
+            f_layer = [nn.Linear(obs_dim, hidden_dim), nn.ReLU(inplace=True)]            
+        elif len(obs_dim) == 2:
+            f_layer = [nn.LSTM(obs_dim[-1], hidden_dim, num_layers=1,
+                               batch_first=True, bidirectional=True)]
+            hidden_dim1 = hidden_dim * 2
+        elif len(obs_dim) == 1:
+            f_layer = [nn.Linear(obs_dim[-1], hidden_dim), nn.ReLU(inplace=True)]            
+        else:
+            raise NotImplementedError("First layer not implemented.")
+        self.f_layer = nn.Sequential(*f_layer)
         self.trunk = nn.Sequential(
-            nn.Linear(obs_dim, hidden_dim), nn.ReLU(inplace=True),
-            nn.Linear(hidden_dim, hidden_dim),  nn.ReLU(inplace=True),
+            nn.Linear(hidden_dim1, hidden_dim),  nn.ReLU(inplace=True),
             nn.Linear(hidden_dim, 2 * action_dim)
         )
 
         self.apply(weight_init)
 
     def forward(self, obs):
-        mu, log_std = self.trunk(obs).chunk(2, dim=-1)
+        if isinstance(self.f_layer[0], nn.LSTM):
+            h, _ = self.f_layer(obs)
+            h = torch.relu(h)
+            h = h[:, -1, :]
+        else:
+            h = self.f_layer(obs)
+
+        mu, log_std = self.trunk(h).chunk(2, dim=-1)
 
         # constrain log_std inside [log_std_min, log_std_max]
         log_std = torch.tanh(log_std)
@@ -124,29 +142,53 @@ class DiagGaussianActor(nn.Module):
 
 class QFunction(nn.Module):
     """MLP for action-state function."""
-    def __init__(self, obs_dim, action_dim, hidden_dim):
+    def __init__(self, obs_dim, action_dim, hidden_dim, preprocess=False):
         super().__init__()
 
+        self.preprocess = preprocess
+
+        if isinstance(obs_dim, int):
+            input_dim = obs_dim + action_dim
+            f_layer = [nn.Linear(input_dim, hidden_dim), nn.ReLU(inplace=True)]
+        elif len(obs_dim) == 2:
+            input_dim = obs_dim[-1] + action_dim
+            self.preprocess = nn.Sequential(
+                nn.Conv1d(obs_dim[0], obs_dim[-1], kernel_size=obs_dim[-1]),
+                nn.Tanh())
+            f_layer = [nn.Linear(input_dim, hidden_dim), nn.ReLU(inplace=True)]     
+        elif len(obs_dim) == 1:
+            input_dim = obs_dim[-1] + action_dim
+            f_layer = [nn.Linear(input_dim, hidden_dim), nn.ReLU(inplace=True)]     
+        self.f_layer = nn.Sequential(*f_layer)
+
         self.trunk = nn.Sequential(
-            nn.Linear(obs_dim + action_dim, hidden_dim), nn.ReLU(inplace=True),
             nn.Linear(hidden_dim, hidden_dim),  nn.ReLU(inplace=True),
             nn.Linear(hidden_dim, 1)
         )
 
     def forward(self, obs, action):
         assert obs.size(0) == action.size(0)
+        
+        if self.preprocess:
+            obs = self.preprocess(obs)
+            if len(obs.shape) == 3:
+                obs = obs.squeeze(-1)
 
         obs_action = torch.cat([obs, action], dim=1)
-        return self.trunk(obs_action)
+        h = self.f_layer(obs_action)
+        if isinstance(self.f_layer[0], nn.Conv1d):
+            h = h.squeeze(-1)
+
+        return self.trunk(h)
 
 
 class Critic(nn.Module):
     """Critic network, employes two q-functions."""
-    def __init__(self, latent_dim, action_shape, hidden_dim):
+    def __init__(self, latent_dim, action_shape, hidden_dim, preprocess=False):
         super().__init__()
 
-        self.Q1 = QFunction(latent_dim, action_shape[0], hidden_dim)
-        self.Q2 = QFunction(latent_dim, action_shape[0], hidden_dim)
+        self.Q1 = QFunction(latent_dim, action_shape[0], hidden_dim, preprocess=preprocess)
+        self.Q2 = QFunction(latent_dim, action_shape[0], hidden_dim, preprocess=preprocess)
 
         self.apply(weight_init)
 

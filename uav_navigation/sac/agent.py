@@ -66,7 +66,8 @@ class ACFunction(GenericFunction):
                  use_cuda=True,
                  is_pixels=False,
                  is_multimodal=False,
-                 use_augmentation=True):
+                 use_augmentation=True,
+                 preprocess=False):
 
         super(ACFunction, self).__init__(use_cuda, is_pixels, is_multimodal,
                                          use_augmentation)
@@ -80,8 +81,8 @@ class ACFunction(GenericFunction):
                                        log_std_bounds=[actor_log_std_min, actor_log_std_max]).to(self.device)
         self.action_range = torch.tensor(actor_min_a), torch.tensor(actor_max_a)
 
-        self.critic = Critic(latent_dim, action_shape, hidden_dim).to(self.device)
-        self.critic_target = Critic(latent_dim, action_shape, hidden_dim).to(self.device)
+        self.critic = Critic(latent_dim, action_shape, hidden_dim, preprocess).to(self.device)
+        self.critic_target = Critic(latent_dim, action_shape, hidden_dim, preprocess).to(self.device)
 
         # Initialize target network with Q-network parameters
         self.critic_target.load_state_dict(self.critic.state_dict())
@@ -90,6 +91,7 @@ class ACFunction(GenericFunction):
         self.log_alpha.requires_grad = True
         # set target entropy to -|A|
         self.target_entropy = -np.prod(action_shape)
+        self.preprocess = preprocess
 
         # optimizers
         self.actor_optimizer = torch.optim.Adam(
@@ -109,6 +111,8 @@ class ACFunction(GenericFunction):
         return self.log_alpha.exp()
 
     def action_inference(self, obs, sample=False):
+        if self.preprocess:
+            obs = self.preprocess(obs)
         dist = self.actor(obs)
         action = dist.sample() if sample else dist.mean
         action = action.cpu().clamp(*self.action_range)
@@ -123,7 +127,10 @@ class ACFunction(GenericFunction):
 
     def update_critic(self, discount, obs, action, reward, next_obs, not_done, weight=None):
         with torch.no_grad():
-            dist = self.actor(next_obs)
+            if self.preprocess:
+                dist = self.actor(self.preprocess(next_obs))
+            else:
+                dist = self.actor(next_obs)
             next_action = dist.rsample()
             log_pi = dist.log_prob(next_action).sum(-1, keepdim=True)
             target_Q1, target_Q2 = self.critic_target(next_obs, next_action)
@@ -132,8 +139,6 @@ class ACFunction(GenericFunction):
 
         # get current Q estimates
         current_Q1, current_Q2 = self.critic(obs, action)
-        # print('current_Q1', current_Q1.shape)
-        # print('current_Q2', current_Q2.shape)
         if weight is not None:
             q_loss = (F.mse_loss(current_Q1, target_Q, reduction='none') +
                       F.mse_loss(current_Q2, target_Q, reduction='none'))
@@ -155,7 +160,10 @@ class ACFunction(GenericFunction):
 
     def update_actor_and_alpha(self, obs, weight=None):
         # detach encoder, so we don't update it with the actor loss
-        dist = self.actor(obs)
+        if self.preprocess:
+            dist = self.actor(self.preprocess(obs))
+        else:
+            dist = self.actor(obs)
         pi = dist.rsample()
         log_pi = dist.log_prob(pi).sum(-1, keepdim=True)
         actor_Q1, actor_Q2 = self.critic(obs, pi)

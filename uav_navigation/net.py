@@ -39,9 +39,9 @@ class QNetwork(nn.Module):
 
 
 class QFeaturesNetwork(nn.Module):
-    n_features = 512
+    feature_dim = 512
 
-    def __init__(self, input_shape, output_shape):
+    def __init__(self, input_shape, output_shape, only_cnn=False):
         super().__init__()
 
         state_size = input_shape[0]
@@ -50,8 +50,8 @@ class QFeaturesNetwork(nn.Module):
         self._h1 = nn.Conv2d(state_size, 32, kernel_size=8, stride=4)
         self._h2 = nn.Conv2d(32, 64, kernel_size=4, stride=2)
         self._h3 = nn.Conv2d(64, 64, kernel_size=3, stride=1)
-        self._h4 = nn.Linear(3136, self.n_features)
-        self._h5 = nn.Linear(self.n_features, action_size)
+        self._h4 = nn.Linear(3136, self.feature_dim)
+
 
         nn.init.xavier_uniform_(self._h1.weight,
                                 gain=nn.init.calculate_gain('relu'))
@@ -61,15 +61,26 @@ class QFeaturesNetwork(nn.Module):
                                 gain=nn.init.calculate_gain('relu'))
         nn.init.xavier_uniform_(self._h4.weight,
                                 gain=nn.init.calculate_gain('relu'))
-        nn.init.xavier_uniform_(self._h5.weight,
-                                gain=nn.init.calculate_gain('linear'))
 
-    def forward(self, state, action=None):
+        if not only_cnn:
+            self._h5 = nn.Linear(self.feature_dim, action_size)
+
+            nn.init.xavier_uniform_(self._h5.weight,
+                                    gain=nn.init.calculate_gain('linear'))
+        self.only_cnn = only_cnn
+
+    def forward_conv(self, state):
         h = torch.relu(self._h1(state / 255.))
         h = torch.relu(self._h2(h))
         h = torch.relu(self._h3(h))
-        h = torch.relu(self._h4(h.view(-1, 3136)))
-        q = self._h5(h)
+        feats = torch.tanh(self._h4(h.view(-1, 3136)))
+        return feats
+
+    def forward(self, state, action=None):
+        feats = self.forward_conv(state)
+        if self.only_cnn:
+            return feats
+        q = self._h5(feats)
 
         if action is None:
             return q
