@@ -9,20 +9,37 @@ import torch
 import torch.nn as nn
 
 
+def weight_init(m):
+    if isinstance(m, (nn.Linear, nn.Conv1d)):
+        nn.init.orthogonal_(m.weight.data)
+        m.bias.data.fill_(0.0)
+    elif isinstance(m, nn.Conv2d) or isinstance(m, nn.ConvTranspose2d):
+        # delta-orthogonal init from https://arxiv.org/pdf/1806.05393.pdf
+        assert m.weight.size(2) == m.weight.size(3)
+        m.weight.data.fill_(0.0)
+        m.bias.data.fill_(0.0)
+        mid = m.weight.size(2) // 2
+        gain = nn.init.calculate_gain('relu')
+        nn.init.orthogonal_(m.weight.data[:, :, mid, mid], gain)
+
+
 class QNetwork(nn.Module):
-    def __init__(self, input_shape, output_shape):
+    def __init__(self, input_shape, output_shape, hidden_dim=512):
         super(QNetwork, self).__init__()
         state_size = input_shape[-1]
         action_size = output_shape[0]
         if len(input_shape) == 2:
-            self.conv1 = nn.Conv1d(input_shape[0], 32, kernel_size=state_size)
+            self.conv1 = nn.Conv1d(input_shape[0], hidden_dim,
+                                   kernel_size=state_size)
         else:
-            self.fc1 = nn.Linear(state_size, 32)
-        self.fc2 = nn.Linear(32, 64)
-        self.fc3 = nn.Linear(64, 512)
-        self.out = nn.Linear(512, action_size)
-        self.drop = nn.Dropout1d(p=0.05)
-        self.leaky_relu = nn.LeakyReLU()
+            self.fc1 = nn.Linear(state_size, hidden_dim)
+        self.drop1 = nn.Dropout(p=0.5)
+        self.fc2 = nn.Linear(hidden_dim, hidden_dim // 2)
+        self.drop2 = nn.Dropout(p=0.25)
+        self.out = nn.Linear(hidden_dim // 2, action_size)
+
+        self.apply(weight_init)
+
 
     def forward(self, x):
         if hasattr(self, 'conv1'):
@@ -30,10 +47,9 @@ class QNetwork(nn.Module):
             x = x.squeeze(2)
         else:
             x = self.fc1(x)
-        x = self.leaky_relu(x)
+        x = self.drop1(x)
         x = torch.relu(self.fc2(x))
-        x = torch.relu(self.fc3(x))
-        x = self.drop(x)
+        x = self.drop2(x)
         x = self.out(x)
         return x
 

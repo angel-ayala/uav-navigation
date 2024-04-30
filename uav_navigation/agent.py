@@ -99,9 +99,15 @@ class QFunction(GenericFunction):
         # self.optimizer = optim.SGD(self.q_network.parameters(),
         #                             lr=learning_rate,
         #                             momentum=momentum,
-        #                             nesterov=True)
-        self.optimizer = adabelief_optimizer(self.q_network,
-                                             learning_rate=learning_rate)
+        #                             nesterov=True,
+        #                             weight_decay=1e-7)
+        self.optimizer = optim.AdamW(self.q_network.parameters(),
+                                      lr=learning_rate,
+                                      amsgrad=True)
+        # self.optimizer = adabelief_optimizer(self.q_network,
+        #                                      learning_rate=learning_rate)
+        # self.optimizer = optim.Adam(self.q_network.parameters(),
+        #                             lr=learning_rate)
 
 
     def update_target_network(self):
@@ -168,14 +174,13 @@ class QFunction(GenericFunction):
 
 
 class GenericAgent:
-    BATCH_SIZE = 32
-
     def __init__(self, 
                  state_shape,
                  action_shape,
                  approximator,
                  discount_factor=0.99,
-                 memory_buffer=None):
+                 memory_buffer=None,
+                 batch_size=128):
         self.state_shape = state_shape
         self.action_shape = action_shape
         self.discount_factor = discount_factor
@@ -183,6 +188,7 @@ class GenericAgent:
         self.approximator = approximator
         # Replay Buffer
         self.memory = memory_buffer
+        self.batch_size = batch_size
     
     @property
     def is_prioritized(self):
@@ -190,7 +196,7 @@ class GenericAgent:
 
     @property
     def can_update(self):
-        return len(self.memory) >= self.BATCH_SIZE
+        return len(self.memory) >= self.batch_size
 
     def save(self, path):
         self.approximator.save(path)
@@ -209,11 +215,12 @@ class DDQNAgent(GenericAgent):
                  epsilon_end=0.01,
                  epsilon_steps=500000,
                  memory_buffer=None,
+                 batch_size=128,
                  train_freq=4,
                  target_update_freq=100):
         super(DDQNAgent, self).__init__(
             state_shape, action_shape, approximator, discount_factor,
-            memory_buffer)
+            memory_buffer, batch_size)
         self.epsilon_start = epsilon_start
         self.epsilon_end = epsilon_end
         self.epsilon_decay = (epsilon_start - epsilon_end) / epsilon_steps
@@ -253,7 +260,7 @@ class DDQNAgent(GenericAgent):
             return False
         # Update the Q-network if replay buffer is sufficiently large
         sampled_data = self.memory.sample(
-            self.BATCH_SIZE, device=self.approximator.device)
+            self.batch_size, device=self.approximator.device)
         if self.is_prioritized:
             states, actions, rewards, next_states, dones = sampled_data[0]
             priorities = sampled_data[1]

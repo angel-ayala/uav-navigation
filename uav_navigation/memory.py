@@ -51,7 +51,6 @@ class ReplayBuffer:
         return self.get_indices(indices, device=device)
 
     def get_indices(self, indices, device=None):
-
         actions = self.actions[indices]
         rewards = self.rewards[indices]
         dones = self.dones[indices]

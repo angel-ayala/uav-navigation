@@ -6,7 +6,6 @@ Created on Tue Nov 14 20:33:17 2023
 @author: Angel Ayala
 """
 
-import gym
 import argparse
 import numpy as np
 import torch
@@ -22,13 +21,11 @@ from uav_navigation.utils import load_json_dict
 from uav_navigation.utils import evaluate_agent
 
 from webots_drone.data import StoreStepData
-from webots_drone.envs.preprocessor import MultiModalObservation
-from webots_drone.envs.preprocessor import ReducedVectorObservation
-from webots_drone.envs.preprocessor import TargetVectorObservation
-from webots_drone.stack import ObservationStack
 
 from learn import list_of_float
 from learn import list_of_int
+from learn import instance_env
+from learn import wrap_env
 
 
 def parse_args():
@@ -79,12 +76,6 @@ def run_evaluation(seed_val, logpath, episode):
     # Environment args
     environment_name = 'webots_drone:webots_drone/DroneEnvDiscrete-v0'
     env_params = load_json_dict(logpath / 'args_environment.json')
-    frame_stack = env_params['frame_stack']
-    del env_params['frame_stack']
-    add_target = False
-    if 'add_target' in env_params.keys():
-        add_target = env_params['add_target']
-        del env_params['add_target']
 
     target_pos = args.target_pos
 
@@ -97,39 +88,20 @@ def run_evaluation(seed_val, logpath, episode):
         env_params['fire_dim'] = args.target_dim
 
     # Create the environment
-    is_multimodal = False
-    if 'is_multimodal' in env_params.keys():
-        is_multimodal = env_params['is_multimodal']
-        del env_params['is_multimodal']
-    env = gym.make(environment_name, **env_params)
-
-    rgb_shape = (3, 84, 84)
-    vector_shape = (22, )
-    if is_multimodal:
-        env = MultiModalObservation(env, shape1=rgb_shape, shape2=vector_shape,
-                                    frame_stack=frame_stack,
-                                    add_target=add_target)
-        state_shape = (env.observation_space[0].shape,
-                       env.observation_space[1].shape)
-    else:
-        add_target = False
-        if add_target and not env_params['is_pixels']:
-            add_target = True
-            env = TargetVectorObservation(env)
-        # env_params['add_target'] = add_target
-
-        if frame_stack > 1:
-            env = ObservationStack(env, k=frame_stack)
+    env, _ = instance_env(env_params, name=environment_name)
+    # Observation preprocessing
+    env = wrap_env(env, env_params)
 
     # Agent params
     agent_params = load_json_dict(logpath / 'args_agent.json')
+    is_srl = agent_params['is_srl']
+    del agent_params['is_srl']
     approximator_params = agent_params['approximator']
-    if agent_params['is_srl']:
+    if is_srl:
         agent_class = SRLDDQNAgent
         q_approximator = SRLQFunction
         function_profiler = profile_srl_approximator
         approximator_params['q_app_fn'] = q_function
-        del agent_params['is_srl']
     else:
         agent_class = DDQNAgent
         q_approximator = QFunction
@@ -141,7 +113,8 @@ def run_evaluation(seed_val, logpath, episode):
     print('action_shape', agent_params['action_shape'])
     # Profile the approximation function computational costs
     approximation_function = q_approximator(**approximator_params)
-    approximation_function.append_autoencoders(agent_params['ae_models'])
+    if is_srl:
+        approximation_function.append_autoencoders(agent_params['ae_models'])
     print('====== Full model computational demands ======')
     function_profiler(approximation_function, agent_params['state_shape'],
                       agent_params['action_shape'])
@@ -149,9 +122,10 @@ def run_evaluation(seed_val, logpath, episode):
     # Profile encoder stage only computational costs
     approximation_function = q_approximator(**approximator_params)
     print('\n====== Reduced inference-only computational demands ======')
-    approximation_function.load(logpath / agent_paths[0],
-                                ae_models=agent_params['ae_models'],
-                                encoder_only=True)
+    if is_srl:
+        approximation_function.load(logpath / agent_paths[0],
+                                    ae_models=agent_params['ae_models'],
+                                    encoder_only=True)
     function_profiler(approximation_function, agent_params['state_shape'],
                       agent_params['action_shape'])
 

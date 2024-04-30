@@ -23,7 +23,7 @@ from uav_navigation.utils import save_dict_json, run_agent
 
 from webots_drone.data import StoreStepData
 from webots_drone.envs.preprocessor import MultiModalObservation
-from webots_drone.envs.preprocessor import TargetVectorObservation
+from webots_drone.envs.preprocessor import CustomVectorObservation
 from webots_drone.stack import ObservationStack
 
 
@@ -68,8 +68,12 @@ def parse_args():
                          help='Whether if reconstruct an image-based observation.')
     arg_env.add_argument("--is-vector", action='store_true',
                          help='Whether if reconstruct a vector-based observation.')
-    arg_env.add_argument("--add-target", action='store_true',
-                         help='Whether if add the target info to vector state.')
+    arg_env.add_argument("--add-target-dist", action='store_true',
+                         help='Whether if add the target distance to vector state.')
+    arg_env.add_argument("--add-target-dim", action='store_true',
+                         help='Whether if add the target dimension to vector state.')
+    arg_env.add_argument("--add-action", action='store_true',
+                         help='Whether if add the previous action to vector state.')
 
     arg_agent = parser.add_argument_group('Agent')
     arg_agent.add_argument("--approximator-lr", type=float, default=10e-5,
@@ -140,6 +144,8 @@ def parse_args():
                               help='Number of training steps.')
     arg_training.add_argument('--memory-steps', type=int, default=2048,
                               help='Number of steps for initial population of the Experience replay buffer.')
+    arg_training.add_argument("--batch-size", type=int, default=128,
+                              help='Minibatch size for training.')
     arg_training.add_argument("--train-frequency", type=int, default=4,
                               help='Steps interval for Q-network batch training.')
     arg_training.add_argument("--reconstruct-frequency", type=int, default=1,
@@ -165,66 +171,91 @@ def parse_args():
     return args
 
 
+def instance_env(args, name='webots_drone:webots_drone/DroneEnvDiscrete-v0'):
+    env_params = dict()
+    if isinstance(args, dict):
+        env_params = args.copy()
+        if 'frame_stack' in env_params.keys():
+            del env_params['frame_stack']
+        if 'target_dist' in env_params.keys():
+            del env_params['target_dist']
+        if 'target_dim' in env_params.keys():
+            del env_params['target_dim']
+        if 'action2obs' in env_params.keys():
+            del env_params['action2obs']
+        if 'uav_data' in env_params.keys():
+            del env_params['uav_data']
+        if 'is_multimodal' in env_params.keys():
+            del env_params['is_multimodal']
+    else:
+        env_params = dict(
+            time_limit_seconds=args.time_limit,
+            max_no_action_seconds=args.time_no_action,
+            frame_skip=args.frame_skip,
+            goal_threshold=args.goal_threshold,
+            init_altitude=args.init_altitude,
+            altitude_limits=args.altitude_limits,
+            fire_pos=args.target_pos,
+            fire_dim=args.target_dim,
+            is_pixels=args.is_pixels)
+
+    # Create the environment
+    env = gym.make(name, **env_params)
+
+    return env, env_params
+
+
+def wrap_env(env, env_params):
+    if env_params['is_multimodal']:
+        env = MultiModalObservation(env, frame_stack=env_params['frame_stack'],
+                                    add_target=env_params['target_dist'])
+    elif not env_params['is_pixels']:
+        env = CustomVectorObservation(env, uav_data=env_params['uav_data'],
+                                      target_dist=env_params['target_dist'],
+                                      target_dim=env_params['target_dim'],
+                                      add_action=env_params['action2obs'])
+
+    if not env_params['is_multimodal'] and env_params['frame_stack'] > 1:
+        env = ObservationStack(env, k=env_params['frame_stack'])
+
+    return env
+
 if __name__ == '__main__':
     args = parse_args()
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
 
-    # Environment args
+    # Environment
     environment_name = 'webots_drone:webots_drone/DroneEnvDiscrete-v0'
-    is_multimodal = args.is_pixels and args.is_vector
-
-    env_params = dict(
-        time_limit_seconds=args.time_limit,  # 1 min
-        max_no_action_seconds=args.time_no_action,  # 5 sec
-        frame_skip=args.frame_skip,  # 200ms
-        goal_threshold=args.goal_threshold,
-        init_altitude=args.init_altitude,
-        altitude_limits=args.altitude_limits,
-        fire_pos=args.target_pos,
-        fire_dim=args.target_dim,
-        is_pixels=args.is_pixels)
-
-    # Create the environment
-    env = gym.make(environment_name, **env_params)
+    env, env_params = instance_env(args, environment_name)
 
     # Observation preprocessing
-    rgb_shape = (3, 84, 84)
-    vector_shape = (22, )
     env_params['frame_stack'] = args.frame_stack
-    env_params['is_multimodal'] = is_multimodal
-    state_shape = rgb_shape if args.is_pixels else vector_shape
+    env_params['is_multimodal'] = args.is_pixels and args.is_vector
+    env_params['target_dist'] = args.add_target_dist
+    env_params['target_dim'] = args.add_target_dim
+    env_params['action2obs'] = args.add_action
+    # env_params['uav_data'] = ['imu', 'gyro', 'gps', 'gps_vel','north',
+    #                           'dist_sensors']
+    env_params['uav_data'] = ['imu', 'gyro', 'gps', 'gps_vel', 'north']
+    # env_params['uav_data'] = []
 
-    if is_multimodal:
-        env = MultiModalObservation(env, shape1=rgb_shape, shape2=vector_shape,
-                                    frame_stack=args.frame_stack,
-                                    add_target=args.add_target)
-        state_shape = (env.observation_space[0].shape,
-                       env.observation_space[1].shape)
-
-    else:
-        add_target = False
-        if args.add_target and not args.is_pixels:
-            add_target = True
-            env = TargetVectorObservation(env)
-        env_params['add_target'] = add_target
-
-        if args.frame_stack > 1:
-            env = ObservationStack(env, k=args.frame_stack)
-            env_params['frame_stack'] = args.frame_stack
-        state_shape = env.observation_space.shape
+    env = wrap_env(env, env_params)
 
     # Agent args
     agent_params = dict(
-        state_shape=state_shape,
+        state_shape=env.observation_space.shape,
         action_shape=(env.action_space.n, ),
         discount_factor=args.discount_factor,
         epsilon_start=args.epsilon_start,
         epsilon_end=args.epsilon_end,
         epsilon_steps=args.epsilon_steps,
+        batch_size=args.batch_size,
         train_freq=args.train_frequency,
         target_update_freq=args.target_update_frequency,
     )
+    print('state_shape', agent_params['state_shape'])
+    print('action_shape', agent_params['action_shape'])
 
     # Append SRL models
     ae_models = dict()
@@ -234,7 +265,7 @@ if __name__ == '__main__':
         tau=args.approximator_tau,
         use_cuda=args.use_cuda,
         is_pixels=args.is_pixels,
-        is_multimodal=is_multimodal,
+        is_multimodal=env_params['is_multimodal'],
         use_augmentation=True)
 
     if args.is_srl:
@@ -247,8 +278,13 @@ if __name__ == '__main__':
             hidden_dim=args.hidden_dim,
             num_layers=args.num_layers)
 
+        image_shape = agent_params['state_shape']
+        if env_params['is_multimodal']:
+            image_shape = image_shape[0]
+        vector_shape = agent_params['state_shape']
+        if env_params['is_multimodal']:
+            vector_shape = vector_shape[1]
         if args.model_rgb:
-            image_shape = agent_params['state_shape'][0] if is_multimodal else agent_params['state_shape']
             ae_models['RGB'] = dict(image_shape=image_shape,
                                     latent_dim=args.latent_dim,
                                     num_layers=args.num_layers,
@@ -257,16 +293,14 @@ if __name__ == '__main__':
                                     decoder_lr=args.decoder_lr,
                                     decoder_weight_decay=args.decoder_weight_decay)        
         if args.model_vector:
-            vector_shape = agent_params['state_shape'][1] if is_multimodal else agent_params['state_shape']
             ae_models['Vector'] = dict(vector_shape=vector_shape,
-                                    hidden_dim=args.hidden_dim,
-                                    latent_dim=args.latent_dim,
-                                    num_layers=args.num_layers,
-                                    encoder_lr=args.encoder_lr,
-                                    decoder_lr=args.decoder_lr,
-                                    decoder_weight_decay=args.decoder_weight_decay)
+                                       hidden_dim=args.hidden_dim,
+                                       latent_dim=args.latent_dim,
+                                       num_layers=args.num_layers,
+                                       encoder_lr=args.encoder_lr,
+                                       decoder_lr=args.decoder_lr,
+                                       decoder_weight_decay=args.decoder_weight_decay)
         if args.model_atc:
-            image_shape = agent_params['state_shape'][0] if is_multimodal else agent_params['state_shape']
             ae_models['ATC'] = dict(image_shape=image_shape,
                                     latent_dim=args.latent_dim,
                                     num_layers=args.num_layers,
@@ -288,7 +322,8 @@ if __name__ == '__main__':
             if args.is_pixels else QNetwork
         approximator_params['q_app_params'] = dict(
             input_shape=agent_params['state_shape'],
-            output_shape=agent_params['action_shape'])
+            output_shape=agent_params['action_shape'],
+            hidden_dim=args.hidden_dim)
     agent_params.update(
         dict(approximator=q_approximator(**approximator_params)))
 
@@ -297,7 +332,7 @@ if __name__ == '__main__':
         buffer_size=args.memory_capacity,
         obs_shape=agent_params['state_shape'],
         action_shape=agent_params['action_shape'],
-        is_multimodal=is_multimodal
+        is_multimodal=env_params['is_multimodal']
     )
     memory_class = ReplayBuffer
 
@@ -320,7 +355,7 @@ if __name__ == '__main__':
     if args.logspath is None:
         path_prefix = 'drone_pixels' if args.is_pixels else 'drone_vector'
         path_suffix = '-srl' if args.is_srl else ''
-        path_suffix += '-multi' if is_multimodal else ''
+        path_suffix += '-multi' if env_params['is_multimodal'] else ''
         timestamp = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
         # Summary folder
         outfolder = Path(f"logs_{path_prefix}/ddqn{path_suffix}_{timestamp}")

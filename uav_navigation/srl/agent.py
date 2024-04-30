@@ -17,11 +17,11 @@ from uav_navigation.agent import DDQNAgent
 from uav_navigation.agent import profile_q_approximator
 from uav_navigation.logger import summary_scalar
 from .net import weight_init
-from .net import PriorModel
-from .net import NorthBelief
-from .net import PositionBelief
-from .net import OrientationBelief
-# from .autoencoder import AEModel
+from .priors import PriorModel
+from .priors import NorthBelief
+from .priors import PositionBelief
+from .priors import OrientationBelief
+from .priors import DistanceBelief
 from .autoencoder import RGBModel
 from .autoencoder import VectorModel
 from .autoencoder import ATCModel
@@ -66,10 +66,10 @@ class SRLFunction:
                            decoder_weight_decay):
         ae_model.to(self.device)
         ae_model.apply(weight_init)
-        ae_model.adabelief_optimizer(encoder_lr, decoder_lr, decoder_weight_decay)
+        ae_model.adam_optimizer(encoder_lr, decoder_lr, decoder_weight_decay)
         self.models.append(ae_model)
 
-    def append_autoencoders(self, models):
+    def append_autoencoders(self, models, encoder_only=False):
         # ensure empty list
         if hasattr(self, 'models'):
             del self.models
@@ -78,13 +78,13 @@ class SRLFunction:
         for m, m_params in models.items():
             # RGB observation reconstruction autoencoder model
             if m =='RGB':
-                ae_model = RGBModel(m_params)
+                ae_model = RGBModel(m_params, encoder_only=encoder_only)
             if m =='Vector':
-                ae_model = VectorModel(m_params)
+                ae_model = VectorModel(m_params, encoder_only=encoder_only)
             if m =='ATC':
-                ae_model = ATCModel(m_params)
+                ae_model = ATCModel(m_params, encoder_only=encoder_only)
             if m =='ATC-RGB':
-                ae_model = ATCRGBModel(m_params)
+                ae_model = ATCRGBModel(m_params, encoder_only=encoder_only)
             self.append_autoencoder(
                 ae_model, m_params['encoder_lr'], m_params['decoder_lr'],
                 m_params['decoder_weight_decay'])
@@ -139,24 +139,31 @@ class SRLFunction:
         summary_scalar("Loss/AutoEncoders", tloss.item())
         return tloss
 
-    def append_prior(self, belief_model, learning_rate=1e-3):
+    def append_prior(self, belief_model, latent_source, obs_target, learning_rate=1e-3):
         belief_model.to(self.device)
         belief_model.apply(weight_init)
-        self.priors.append(PriorModel(belief_model))
+        print('belief_model', belief_model)
+        self.priors.append(PriorModel(belief_model,
+                                      latent_source=latent_source,
+                                      obs_target=obs_target))
         # self.priors[-1].sgd_optimizer(learning_rate=learning_rate)
-        self.priors[-1].adabelief_optimizer(learning_rate=learning_rate)
+        self.priors[-1].adam_optimizer(learning_rate=learning_rate)
 
     def compute_priors_loss(self, obs, obs_t1, actions):
-        obs_2d, obs_1d = self.format_obs(obs)
-        obs_2d_t1, obs_1d_t1 = self.format_obs(obs_t1)
+        if self.is_multimodal:
+            obs_2d, obs_1d = self.format_obs(obs, augment=False)
+        elif self.is_pixels:
+            obs_2d = self.format_obs(obs, augment=False)
+        else:
+            obs_1d = self.format_obs(obs, augment=False)
 
         loss_list = list()
         for pmodel in self.priors:
             z = self.compute_z(obs, pmodel.latent_source)
             hat_x = pmodel(z)
-            if 'rgb' in pmodel.obs_target:
+            if 'RGB' in pmodel.obs_target:
                 x_true = pmodel.obs2target(obs_2d)
-            elif 'vector' in pmodel.obs_target:
+            elif 'Vector' in pmodel.obs_target:
                 x_true = pmodel.obs2target(obs_1d)
 
             loss = pmodel.compute_loss(hat_x, x_true)
@@ -259,26 +266,42 @@ class SRLAgent:
                  ae_models,
                  reconstruct_freq=1,
                  srl_loss=False,
-                 priors=False):
+                 priors=False,
+                 encoder_only=False):
         self.ae_models = ae_models
-        self.init_models()
+        self.init_models(encoder_only)
         self.reconstruct_freq = reconstruct_freq
         self.srl_loss = srl_loss
         self.priors = priors
         if priors:
             self.init_priors()
 
-    def init_models(self):
-        self.approximator.append_autoencoders(self.ae_models)
+    def init_models(self, encoder_only):
+        self.approximator.append_autoencoders(self.ae_models,
+                                              encoder_only=encoder_only)
 
     def init_priors(self):
-        self.approximator.append_prior(NorthBelief(self.state_shape[1], 50))
-        self.approximator.append_prior(OrientationBelief(self.state_shape[1], 50), learning_rate=1e-4)
-        self.approximator.append_prior(PositionBelief(self.state_shape[1], 50))
-
+        for prior_id, prior_params in self.priors.items():
+            if prior_id == 'north':
+                pmodel = NorthBelief(prior_params['state_shape'],
+                                     prior_params['latent_dim'],
+                                     prior_params['hidden_dim'],
+                                     prior_params['num_layers'])
+            if prior_id == 'orientation':
+                pmodel = OrientationBelief(*prior_params)
+            if prior_id == 'position':
+                pmodel = PositionBelief(*prior_params)
+            if prior_id == 'distance':
+                pmodel = DistanceBelief(prior_params['latent_dim'],
+                                        prior_params['hidden_dim'],
+                                        prior_params['num_layers'])
+            self.approximator.append_prior(pmodel,
+                                           prior_params['source_obs'],
+                                           prior_params['target_obs'],
+                                           learning_rate=prior_params['learning_rate'])
     def update_reconstruction(self):
         # sampled_data = self.memory.random_sample(self.BATCH_SIZE, device=self.approximator.device)
-        sampled_data = self.memory.sample(self.BATCH_SIZE, device=self.approximator.device)
+        sampled_data = self.memory.sample(self.batch_size, device=self.approximator.device)
 
         if self.is_prioritized:
             obs, actions, rewards, obs_t1, dones = sampled_data[0]
@@ -355,6 +378,7 @@ class SRLDDQNAgent(DDQNAgent, SRLAgent):
                  epsilon_end=0.01,
                  epsilon_steps=500000,
                  memory_buffer=None,
+                 batch_size=128,
                  train_freq=4,
                  target_update_freq=100,
                  reconstruct_freq=1,
@@ -369,6 +393,7 @@ class SRLDDQNAgent(DDQNAgent, SRLAgent):
                            epsilon_end=epsilon_end,
                            epsilon_steps=epsilon_steps,
                            memory_buffer=memory_buffer,
+                           batch_size=batch_size,
                            train_freq=train_freq,
                            target_update_freq=target_update_freq)
         SRLAgent.__init__(self, ae_models,

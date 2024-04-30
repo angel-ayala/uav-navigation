@@ -14,7 +14,6 @@ from info_nce import InfoNCE
 from uav_navigation.utils import profile_model
 from uav_navigation.utils import soft_update_params
 from uav_navigation.logger import summary_scalar
-from uav_navigation.logger import summary_image
 
 from .net import preprocess_obs
 from .net import rgb_reconstruction_model
@@ -203,9 +202,14 @@ class AEModel:
         rec_obs, h = self.reconstruct_obs(obs_augm)
         
         if len(obs.shape) == 3:
-            # [-1, 1] -> [-0.5, 0.5]
+            # TODO: normalize
             true_obs = obs
-            output_obs = rec_obs
+            # de-stack
+            obs_shape = obs.shape
+            n_stack = obs_shape[1] // 1
+            r_shape = (obs_shape[0] * n_stack, ) + obs_shape[-1:]
+            true_obs = true_obs.reshape(r_shape)
+            output_obs = rec_obs.reshape(r_shape)
 
         if len(obs.shape) == 4:
             # preprocess images to be in [-0.5, 0.5] range
