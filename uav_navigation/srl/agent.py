@@ -9,24 +9,23 @@ Based on:
 https://arxiv.org/abs/1910.01741
 """
 import torch
-# from torchvision.transforms import AutoAugment
-# from torchvision.transforms import AugMix
 from thop import clever_format
 from uav_navigation.agent import QFunction
 from uav_navigation.agent import DDQNAgent
 from uav_navigation.agent import profile_q_approximator
 from uav_navigation.logger import summary_scalar
+from .autoencoder import RGBModel
+from .autoencoder import VectorModel
+from .autoencoder import ATCModel
+from .autoencoder import ATCRGBModel
+from .autoencoder import profile_ae_model
 from .net import weight_init
 from .priors import PriorModel
 from .priors import NorthBelief
 from .priors import PositionBelief
 from .priors import OrientationBelief
 from .priors import DistanceBelief
-from .autoencoder import RGBModel
-from .autoencoder import VectorModel
-from .autoencoder import ATCModel
-from .autoencoder import ATCRGBModel
-from .autoencoder import profile_ae_model
+
 
 
 def profile_srl_approximator(approximator, state_shape, action_shape):
@@ -133,7 +132,8 @@ class SRLFunction:
             if "RGB" in ae_model.type:
                 loss = ae_model.compute_loss(obs_2d, obs_2d_augm, self.decoder_latent_lambda)
             if "Vector" in ae_model.type:
-                loss = ae_model.compute_loss(obs_1d, obs_1d, self.decoder_latent_lambda)
+                obs_1d = self.normalize_vector(obs_1d)
+                loss = ae_model.compute_loss(obs_1d, obs_1d_augm, self.decoder_latent_lambda)
             total_loss.append(loss)
         tloss = torch.sum(torch.stack(total_loss))
         summary_scalar("Loss/AutoEncoders", tloss.item())
@@ -331,13 +331,13 @@ class SRLAgent:
 
 
 class SRLQFunction(QFunction, SRLFunction):
-    def __init__(self, q_app_fn, q_app_params, learning_rate=1e-3,
+    def __init__(self, q_app_fn, q_app_params, obs_space, learning_rate=1e-3,
                  momentum=0.9, tau=0.1, use_cuda=True, is_pixels=False,
                  is_multimodal=False, use_augmentation=True,
                  decoder_latent_lambda=1e-6):
-        QFunction.__init__(self, q_app_fn, q_app_params, learning_rate,momentum,
-                           tau=tau, use_cuda=use_cuda, is_pixels=is_pixels,
-                           is_multimodal=is_multimodal,
+        QFunction.__init__(self, q_app_fn, q_app_params, obs_space,
+                           learning_rate, momentum, tau=tau, use_cuda=use_cuda,
+                           is_pixels=is_pixels, is_multimodal=is_multimodal,
                            use_augmentation=use_augmentation)
         SRLFunction.__init__(self, decoder_latent_lambda)
 
@@ -369,7 +369,6 @@ class SRLQFunction(QFunction, SRLFunction):
 
 class SRLDDQNAgent(DDQNAgent, SRLAgent):
     def __init__(self,
-                 state_shape,
                  action_shape,
                  approximator,
                  ae_models,
@@ -385,7 +384,6 @@ class SRLDDQNAgent(DDQNAgent, SRLAgent):
                  srl_loss=False,
                  priors=False):
         DDQNAgent.__init__(self,
-                           state_shape,
                            action_shape,
                            approximator,
                            discount_factor=discount_factor,

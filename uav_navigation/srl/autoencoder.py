@@ -198,17 +198,14 @@ class AEModel:
         return state_priors_loss        
 
     def compute_reconstruction_loss(self, obs, obs_augm, decoder_latent_lambda, pixel_obs_log=False):
-        # print('AEModel obs', obs.shape, obs.min(), obs.max())
         rec_obs, h = self.reconstruct_obs(obs_augm)
         
         if len(obs.shape) == 3:
-            # TODO: normalize
-            true_obs = obs
             # de-stack
             obs_shape = obs.shape
             n_stack = obs_shape[1] // 1
             r_shape = (obs_shape[0] * n_stack, ) + obs_shape[-1:]
-            true_obs = true_obs.reshape(r_shape)
+            true_obs = obs.reshape(r_shape)
             output_obs = rec_obs.reshape(r_shape)
 
         if len(obs.shape) == 4:
@@ -223,17 +220,6 @@ class AEModel:
 
         rec_loss = F.mse_loss(true_obs, output_obs) #* 10
         summary_scalar(f'Loss/Reconstruction/{self.type}/MSE', rec_loss.item())
-        # bce_loss = F.binary_cross_entropy(rec_obs + 0.5, target_obs + 0.5)
-        # summary_scalar(f'Loss/Reconstruction/{self.type}/BCE', bce_loss.item())
-        # rec_loss += bce_loss # * 1e-3
-        # rec_loss = F.smooth_l1_loss(rec_obs + 0.5, target_obs + 0.5, beta=0.1)  # good choice
-        # summary_scalar(f'Loss/{self.type}/ReconstructionLoss', rec_loss.item())
-        # log_diff_loss = logarithmic_difference_loss(rec_obs + 0.5, target_obs + 0.5, gamma=0.2)
-        # summary_scalar(f'Loss/{self.type}/LogDiff', log_diff_loss.item())
-        # rec_loss += log_diff_loss * 1e-6 # 0.000001
-        # ssim_loss = self.ssim_loss(rec_obs + 0.5, target_obs + 0.5)
-        # summary_scalar(f'Loss/{self.type}/SSIM', ssim_loss.item())
-        # rec_loss += ssim_loss * 1e-6  # 0.00001
 
         # add L2 penalty on latent representation
         # see https://arxiv.org/pdf/1903.12436.pdf
@@ -241,12 +227,11 @@ class AEModel:
         summary_scalar(f'Loss/Encoder/{self.type}/L2', latent_loss.item())
 
         rloss = rec_loss + decoder_latent_lambda * latent_loss
-        # summary_scalar(f'Loss/Reconstruction/{self.type}', rloss.item())
 
         if pixel_obs_log:
             log_image_batch(obs, "Agent/observation")
             log_image_batch(obs_augm, "Agent/observation_augm")
-            log_image_batch(rec_obs + 0.5, "Agent/reconstruction")
+            log_image_batch(rec_obs, "Agent/reconstruction")
 
         self.n_calls += 1
         return rloss

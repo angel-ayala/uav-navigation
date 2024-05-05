@@ -90,7 +90,7 @@ def run_evaluation(seed_val, logpath, episode):
     # Create the environment
     env, _ = instance_env(env_params, name=environment_name)
     # Observation preprocessing
-    env = wrap_env(env, env_params)
+    env, _ = wrap_env(env, env_params)
 
     # Agent params
     agent_params = load_json_dict(logpath / 'args_agent.json')

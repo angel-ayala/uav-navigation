@@ -16,7 +16,7 @@ from .utils import soft_update_params
 from .utils import format_obs
 from .memory import is_prioritized_memory
 from .logger import summary_scalar
-from .srl.net import adabelief_optimizer
+# from .srl.net import adabelief_optimizer
 
 
 def profile_q_approximator(approximator, state_shape, action_shape):
@@ -34,13 +34,33 @@ def profile_q_approximator(approximator, state_shape, action_shape):
 
 
 class GenericFunction:
-    def __init__(self, use_cuda=True, is_pixels=False, is_multimodal=False,
+    def __init__(self, obs_space, use_cuda=True, is_pixels=False, is_multimodal=False,
                  use_augmentation=True):
+        self.obs_space = obs_space
         self.device = 'cuda'\
             if torch.cuda.is_available() and use_cuda else 'cpu'
         self.is_pixels = is_pixels
         self.is_multimodal = is_multimodal
         self.augment_model = AutoAugment() if use_augmentation else False
+
+    def normalize_obs(self, obs):
+        if self.is_multimodal:
+            return (obs[0] / self.obs_space[0].high,
+                    obs[1] / self.obs_space[1].high)
+        else:
+            return obs / self.obs_space.high
+
+    def normalize_image(self, obs):
+        if self.is_multimodal:
+            return obs[0] / self.obs_space[0].high
+        else:
+            return obs / self.obs_space.high
+
+    def normalize_vector(self, obs):
+        if self.is_multimodal:
+            return obs[1] / self.obs_space[1].high
+        else:
+            return obs / self.obs_space.high
 
     def augment_image(self, obs_2d):
         if self.augment_model:
@@ -81,10 +101,11 @@ class GenericFunction:
 
 class QFunction(GenericFunction):
 
-    def __init__(self, q_app_fn, q_app_params, learning_rate=10e-5,
+    def __init__(self, q_app_fn, q_app_params, obs_space, learning_rate=10e-5,
                  momentum=0.9, tau=0.1, use_cuda=True, is_pixels=False,
                  is_multimodal=False, use_augmentation=True):
-        super(QFunction, self).__init__(use_cuda, is_pixels, is_multimodal, use_augmentation)
+        super(QFunction, self).__init__(obs_space, use_cuda,
+                                        is_pixels, is_multimodal, use_augmentation)
 
         self.tau = tau
         # Q-networks
@@ -102,13 +123,12 @@ class QFunction(GenericFunction):
         #                             nesterov=True,
         #                             weight_decay=1e-7)
         self.optimizer = optim.AdamW(self.q_network.parameters(),
-                                      lr=learning_rate,
-                                      amsgrad=True)
+                                     lr=learning_rate,
+                                     amsgrad=True)
         # self.optimizer = adabelief_optimizer(self.q_network,
         #                                      learning_rate=learning_rate)
         # self.optimizer = optim.Adam(self.q_network.parameters(),
         #                             lr=learning_rate)
-
 
     def update_target_network(self):
         # Soft update the target network
@@ -164,7 +184,8 @@ class QFunction(GenericFunction):
         q_app_path = str(path) + "_q_function.pth"
         checkpoint = torch.load(q_app_path, map_location=self.device)
         self.q_network.load_state_dict(checkpoint['q_network_state_dict'])
-        self.target_q_network.load_state_dict(checkpoint['target_q_network_state_dict'])
+        self.target_q_network.load_state_dict(
+            checkpoint['target_q_network_state_dict'])
         if not eval_only:
             self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         else:
@@ -174,14 +195,12 @@ class QFunction(GenericFunction):
 
 
 class GenericAgent:
-    def __init__(self, 
-                 state_shape,
+    def __init__(self,
                  action_shape,
                  approximator,
                  discount_factor=0.99,
                  memory_buffer=None,
                  batch_size=128):
-        self.state_shape = state_shape
         self.action_shape = action_shape
         self.discount_factor = discount_factor
         # approximation function
@@ -189,7 +208,7 @@ class GenericAgent:
         # Replay Buffer
         self.memory = memory_buffer
         self.batch_size = batch_size
-    
+
     @property
     def is_prioritized(self):
         return is_prioritized_memory(self.memory)
@@ -207,7 +226,6 @@ class GenericAgent:
 
 class DDQNAgent(GenericAgent):
     def __init__(self,
-                 state_shape,
                  action_shape,
                  approximator,
                  discount_factor=0.99,
@@ -219,7 +237,7 @@ class DDQNAgent(GenericAgent):
                  train_freq=4,
                  target_update_freq=100):
         super(DDQNAgent, self).__init__(
-            state_shape, action_shape, approximator, discount_factor,
+            action_shape, approximator, discount_factor,
             memory_buffer, batch_size)
         self.epsilon_start = epsilon_start
         self.epsilon_end = epsilon_end
@@ -235,7 +253,8 @@ class DDQNAgent(GenericAgent):
         else:
             with torch.no_grad():
                 observation = self.approximator.format_obs(state)
-                q_values = self.approximator.compute_q(observation).cpu().numpy()
+                q_values = self.approximator.compute_q(
+                    observation).cpu().numpy()
             return np.argmax(q_values)  # Exploit
 
     def update_epsilon(self, n_step):
@@ -255,7 +274,7 @@ class DDQNAgent(GenericAgent):
         if step % self.target_update_freq == 0:
             self.approximator.update_target_network()
 
-    def update_td(self, augment=True):        
+    def update_td(self, augment=True):
         if not self.can_update:
             return False
         # Update the Q-network if replay buffer is sufficiently large
@@ -266,7 +285,7 @@ class DDQNAgent(GenericAgent):
             priorities = sampled_data[1]
         else:
             states, actions, rewards, next_states, dones = sampled_data
-        
+
         # prepare data
         states = self.approximator.format_obs(states, augment)
         next_states = self.approximator.format_obs(next_states, augment)
@@ -352,7 +371,8 @@ class DoubleDuelingQAgent(DDQNAgent):
             (1 - sampled_data[4]) * next_q_values
 
         # Compute the loss and backpropagate
-        loss = nn.functional.smooth_l1_loss(current_q_values, target_q_values.unsqueeze(1))
+        loss = nn.functional.smooth_l1_loss(
+            current_q_values, target_q_values.unsqueeze(1))
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()

@@ -35,16 +35,16 @@ def list_of_int(arg):
     return list(map(int, arg.split(',')))
 
 
-def xy_coordinates(arg):
-    if arg.lower() == 'random':
-        return None
-    return list_of_float(arg)
+def uav_data_list(arg):
+    avlbl_data = ['imu', 'gyro', 'gps', 'gps_vel', 'north', 'dist_sensors']
+    sel_data = list()
+    for d in arg.lower().split(','):
+        if d in avlbl_data:
+            sel_data.append(d)
+    return sel_data
 
 
-def parse_args():
-    # Argument parser
-    parser = argparse.ArgumentParser()
-
+def parse_environment_args(parser):
     arg_env = parser.add_argument_group('Environment')
     arg_env.add_argument("--time-limit", type=int, default=600,  # 10m
                          help='Max time (seconds) of the mission.')
@@ -74,38 +74,59 @@ def parse_args():
                          help='Whether if add the target dimension to vector state.')
     arg_env.add_argument("--add-action", action='store_true',
                          help='Whether if add the previous action to vector state.')
+    arg_env.add_argument("--uav-data", type=uav_data_list,
+                         default=['imu', 'gyro', 'gps', 'gps_vel', 'north', 'dist_sensors'],
+                         help='Select the UAV sensor data as state, available'
+                         ' options are: imu, gyro, gps, gps_vel, north, dist_sensors')
+    return arg_env
 
+
+def parse_agent_args(parser):
     arg_agent = parser.add_argument_group('Agent')
-    arg_agent.add_argument("--approximator-lr", type=float, default=10e-5,
-                           help='Q approximation function SGD learning rate.'
+    arg_agent.add_argument("--approximator-lr", type=float, default=1e-4,
+                           help='Q approximation function AdamW learning rate.'
                            'default value is recommended in: '
                            '[Interference and Generalization in Temporal '
                            'Difference Learning]('
                            'https://proceedings.mlr.press/v119/bengio20a.html )')
     arg_agent.add_argument("--approximator-beta", type=float, default=0.9,
                            help='Q approximation function Adam \beta.')
-    arg_agent.add_argument("--approximator-tau", type=float, default=0.1,
+    arg_agent.add_argument("--approximator-tau", type=float, default=0.01,
                            help='Soft target update \tau.')
     arg_agent.add_argument("--discount-factor", type=float, default=0.99,
                            help='Discount factor \gamma.')
+    arg_agent.add_argument("--approximator-momentum", type=float, default=.9,
+                           help='Momentum factor factor for the SGD using'
+                           'using nesterov')
     arg_agent.add_argument("--epsilon-start", type=float, default=1.0,
                            help='Initial epsilon value for exploration.')
     arg_agent.add_argument("--epsilon-end", type=float, default=0.01,
                            help='Final epsilon value for exploration.')
     arg_agent.add_argument("--epsilon-steps", type=int, default=90000,  # 5h at 25 frames
                            help='Number of steps to reach minimum value for Epsilon.')
-    arg_agent.add_argument("--memory-capacity", type=int, default=65536,  # 2**16
-                           help='Maximum number of transitions in the Experience replay buffer.')
-    arg_agent.add_argument("--memory-prioritized", action='store_true',
-                           help='Whether if memory buffer is Prioritized experiencie replay or not.')
-    arg_agent.add_argument("--prioritized-alpha", type=float, default=0.6,
-                           help='Alpha prioritization exponent for PER.')
-    arg_agent.add_argument("--prioritized-initial-beta", type=float, default=0.4,
-                           help='Beta bias for sampling for PER.')
-    arg_agent.add_argument("--approximator-momentum", type=float, default=.9,
-                           help='Momentum factor factor for the SGD using'
-                           'using nesterov')
+    arg_agent.add_argument('--eval-epsilon', type=float, default=0.01,
+                           help='Epsilon value used for evaluation.')
+    arg_agent.add_argument("--train-frequency", type=int, default=4,
+                           help='Steps interval for Q-network batch training.')
+    arg_agent.add_argument("--target-update-frequency", type=int, default=1500,  # 5m at 25 frames
+                           help='Steps interval for target network update.')
+    return arg_agent
 
+
+def parse_memory_args(parser):
+    arg_mem = parser.add_argument_group('Memory buffer')
+    arg_mem.add_argument("--memory-capacity", type=int, default=65536,  # 2**16
+                           help='Maximum number of transitions in the Experience replay buffer.')
+    arg_mem.add_argument("--memory-prioritized", action='store_true',
+                           help='Whether if memory buffer is Prioritized experiencie replay or not.')
+    arg_mem.add_argument("--prioritized-alpha", type=float, default=0.6,
+                           help='Alpha prioritization exponent for PER.')
+    arg_mem.add_argument("--prioritized-initial-beta", type=float, default=0.4,
+                           help='Beta bias for sampling for PER.')
+    return arg_mem
+
+
+def parse_srl_args(parser):
     arg_srl = parser.add_argument_group(
         'State representation learning variation')
     arg_srl.add_argument("--is-srl", action='store_true',
@@ -119,26 +140,39 @@ def parse_args():
     arg_srl.add_argument("--num-layers", type=int, default=2,
                          help='Number of hidden layers.')
     arg_srl.add_argument("--encoder-lr", type=float, default=1e-3,
-                         help='Encoder function SGD learning rate.')
+                         help='Encoder function Adam learning rate.')
+    arg_srl.add_argument("--encoder-tau", type=float, default=0.05,
+                         help='Encoder \tau polyak update.')
     arg_srl.add_argument("--decoder-lr", type=float, default=1e-3,
-                         help='Decoder function SGD learning rate.')
+                         help='Decoder function Adam learning rate.')
     arg_srl.add_argument("--decoder-latent-lambda", type=float, default=1e-6,
                          help='Decoder regularization \lambda value.')
     arg_srl.add_argument("--decoder-weight-decay", type=float, default=1e-7,
                          help='Decoder function Adam weight decay value.')
+    arg_srl.add_argument("--reconstruct-frequency", type=int, default=1,
+                         help='Steps interval for AE batch training.')
     arg_srl.add_argument("--model-rgb", action='store_true',
                          help='Whether if use the RGB reconstruction model.')
-    arg_srl.add_argument("--model-pose", action='store_true',
-                         help='Whether if use the Pose reconstruction model.')
     arg_srl.add_argument("--model-vector", action='store_true',
                          help='Whether if use the Vector reconstruction model.')
+    arg_srl.add_argument("--model-pose", action='store_true',
+                         help='Whether if use the Pose reconstruction model.')
     arg_srl.add_argument("--model-atc", action='store_true',
                          help='Whether if use the Augmented Temporal Contrast model.')
     arg_srl.add_argument("--use-priors", action='store_true',
                          help='Whether if use the Prior models.')
     arg_srl.add_argument("--use-srl-loss", action='store_true',
                          help='Whether if use the SRL loss.')
+    arg_srl.add_argument("--encoder-only", action='store_true',
+                         help='Whether if use the SRL loss.')
+    arg_srl.add_argument("--distance-prior", action='store_true',
+                         help='Whether if use the Prior models.')
+    arg_srl.add_argument("--north-prior", action='store_true',
+                         help='Whether if use the SRL loss.')
+    return arg_srl
 
+
+def parse_training_args(parser):
     arg_training = parser.add_argument_group('Training')
     arg_training.add_argument("--steps", type=int, default=450000,  # 25h at 25 frames
                               help='Number of training steps.')
@@ -146,19 +180,14 @@ def parse_args():
                               help='Number of steps for initial population of the Experience replay buffer.')
     arg_training.add_argument("--batch-size", type=int, default=128,
                               help='Minibatch size for training.')
-    arg_training.add_argument("--train-frequency", type=int, default=4,
-                              help='Steps interval for Q-network batch training.')
-    arg_training.add_argument("--reconstruct-frequency", type=int, default=1,
-                              help='Steps interval for AE batch training.')
-    arg_training.add_argument("--target-update-frequency", type=int, default=1500,  # 5m at 25 frames
-                              help='Steps interval for target network update.')
     arg_training.add_argument('--eval-interval', type=int, default=9000,  # 30m at 25 frames
                               help='Steps interval for progress evaluation.')
-    arg_training.add_argument('--eval-epsilon', type=float, default=0.01,
-                              help='Epsilon value used for evaluation.')
     arg_training.add_argument('--eval-steps', type=int, default=300,  # 1m at 25 frames
                               help='Number of evaluation steps.')
+    return arg_training
 
+
+def parse_utils_args(parser):
     arg_utils = parser.add_argument_group('Utils')
     arg_utils.add_argument('--use-cuda', action='store_true',
                            help='Flag specifying whether to use the GPU.')
@@ -166,9 +195,21 @@ def parse_args():
                            help='Seed valu for torch and nummpy.')
     arg_utils.add_argument('--logspath', type=str, default=None,
                            help='Specific output path for training results.')
+    return arg_utils
 
-    args = parser.parse_args()
-    return args
+
+def parse_args():
+    # Argument parser
+    parser = argparse.ArgumentParser()
+
+    arg_env = parse_environment_args(parser)
+    arg_agent = parse_agent_args(parser)
+    arg_mem = parse_memory_args(parser)
+    arg_srl = parse_srl_args(parser)
+    arg_training = parse_training_args(parser)
+    arg_utils = parse_utils_args(parser)
+
+    return parser.parse_args()
 
 
 def instance_env(args, name='webots_drone:webots_drone/DroneEnvDiscrete-v0'):
@@ -202,6 +243,21 @@ def instance_env(args, name='webots_drone:webots_drone/DroneEnvDiscrete-v0'):
     # Create the environment
     env = gym.make(name, **env_params)
 
+    if not isinstance(args, dict):
+        env_params['frame_stack'] = args.frame_stack
+        env_params['is_multimodal'] = args.is_pixels and args.is_vector
+        env_params['is_vector'] = args.is_vector
+        env_params['target_dist'] = args.add_target_dist
+        env_params['target_dim'] = args.add_target_dim
+        env_params['action2obs'] = args.add_action
+        env_params['uav_data'] = args.uav_data
+
+    env_params['state_shape'] = env.observation_space.shape
+    if len(env.action_space.shape) == 0:
+        env_params['action_shape'] = (env.action_space.n, )
+    else:
+        env_params['action_shape'] = env.action_space.shape
+
     return env, env_params
 
 
@@ -218,7 +274,79 @@ def wrap_env(env, env_params):
     if not env_params['is_multimodal'] and env_params['frame_stack'] > 1:
         env = ObservationStack(env, k=env_params['frame_stack'])
 
-    return env
+    env_params['state_shape'] = env.observation_space.shape
+    if len(env.action_space.shape) == 0:
+        # discrete action space
+        env_params['action_shape'] = (env.action_space.n, )
+    else:
+        env_params['action_shape'] = env.action_space.shape
+
+    return env, env_params
+
+
+def args2ae_model(args, env_params):
+    ae_models = dict()
+    image_shape = env_params['state_shape']
+    vector_shape = env_params['state_shape']
+    if env_params['is_multimodal']:
+        image_shape = image_shape[0]
+        vector_shape = vector_shape[1]
+
+    if args.model_rgb:
+        assert env_params['is_pixels'], 'RGB model requires is_pixels flag.'
+        ae_models['RGB'] = dict(image_shape=image_shape,
+                                latent_dim=args.latent_dim,
+                                num_layers=args.num_layers,
+                                num_filters=args.num_filters,
+                                encoder_lr=args.encoder_lr,
+                                decoder_lr=args.decoder_lr,
+                                decoder_weight_decay=args.decoder_weight_decay)
+    if args.model_vector:
+        assert env_params['is_vector'], 'Vector model requires is_vector flag.'
+        ae_models['Vector'] = dict(vector_shape=vector_shape,
+                                   hidden_dim=args.hidden_dim,
+                                   latent_dim=args.latent_dim,
+                                   num_layers=args.num_layers,
+                                   encoder_lr=args.encoder_lr,
+                                   decoder_lr=args.decoder_lr,
+                                   decoder_weight_decay=args.decoder_weight_decay)
+    if args.model_atc:
+        assert env_params['is_pixels'], 'ATC model requires is_pixels flag.'
+        ae_models['ATC'] = dict(image_shape=image_shape,
+                                latent_dim=args.latent_dim,
+                                num_layers=args.num_layers,
+                                num_filters=args.num_filters,
+                                encoder_lr=args.encoder_lr,
+                                decoder_lr=args.decoder_lr,
+                                decoder_weight_decay=args.decoder_weight_decay)
+    return ae_models
+
+
+def args2priors(args, env_params):
+    agent_priors = dict()
+    # image_shape = env_params['state_shape']
+    vector_shape = env_params['state_shape']
+    if env_params['is_multimodal']:
+        # image_shape = image_shape[0]
+        vector_shape = vector_shape[1]
+
+    if args.distance_prior:
+        agent_priors['distance'] = dict(latent_dim=args.latent_dim,
+                                        hidden_dim=args.hidden_dim,
+                                        num_layers=1,
+                                        source_obs=['Vector'],
+                                        target_obs=['Vector'],
+                                        learning_rate=1e-4)
+    if args.north_prior:
+        agent_priors['north'] = dict(state_shape=vector_shape,
+                                     latent_dim=args.latent_dim,
+                                     hidden_dim=args.hidden_dim,
+                                     num_layers=1,
+                                     source_obs=['Vector'],
+                                     target_obs=['Vector'],
+                                     learning_rate=1e-4)
+    return agent_priors
+
 
 if __name__ == '__main__':
     args = parse_args()
@@ -228,24 +356,12 @@ if __name__ == '__main__':
     # Environment
     environment_name = 'webots_drone:webots_drone/DroneEnvDiscrete-v0'
     env, env_params = instance_env(args, environment_name)
-
     # Observation preprocessing
-    env_params['frame_stack'] = args.frame_stack
-    env_params['is_multimodal'] = args.is_pixels and args.is_vector
-    env_params['target_dist'] = args.add_target_dist
-    env_params['target_dim'] = args.add_target_dim
-    env_params['action2obs'] = args.add_action
-    # env_params['uav_data'] = ['imu', 'gyro', 'gps', 'gps_vel','north',
-    #                           'dist_sensors']
-    env_params['uav_data'] = ['imu', 'gyro', 'gps', 'gps_vel', 'north']
-    # env_params['uav_data'] = []
-
-    env = wrap_env(env, env_params)
+    env, env_params = wrap_env(env, env_params)
 
     # Agent args
     agent_params = dict(
-        state_shape=env.observation_space.shape,
-        action_shape=(env.action_space.n, ),
+        action_shape=env_params['action_shape'],
         discount_factor=args.discount_factor,
         epsilon_start=args.epsilon_start,
         epsilon_end=args.epsilon_end,
@@ -254,12 +370,14 @@ if __name__ == '__main__':
         train_freq=args.train_frequency,
         target_update_freq=args.target_update_frequency,
     )
-    print('state_shape', agent_params['state_shape'])
+    print('state_shape', env_params['state_shape'])
+    if args.is_vector or not args.is_pixels:
+        print('uav_data', env_params['uav_data'])
     print('action_shape', agent_params['action_shape'])
 
     # Append SRL models
-    ae_models = dict()
     approximator_params = dict(
+        obs_space=env.observation_space,
         learning_rate=args.approximator_lr,
         momentum=args.approximator_momentum,
         tau=args.approximator_tau,
@@ -271,48 +389,16 @@ if __name__ == '__main__':
     if args.is_srl:
         agent_class = SRLDDQNAgent
         q_approximator = SRLQFunction
+        ae_models = args2ae_model(args, env_params)
         approximator_params['q_app_fn'] = q_function
         approximator_params['q_app_params'] = dict(
-            latent_dim=args.latent_dim,
+            latent_dim=args.latent_dim * len(ae_models.keys()),
             action_shape=agent_params['action_shape'],
             hidden_dim=args.hidden_dim,
             num_layers=args.num_layers)
 
-        image_shape = agent_params['state_shape']
-        if env_params['is_multimodal']:
-            image_shape = image_shape[0]
-        vector_shape = agent_params['state_shape']
-        if env_params['is_multimodal']:
-            vector_shape = vector_shape[1]
-        if args.model_rgb:
-            ae_models['RGB'] = dict(image_shape=image_shape,
-                                    latent_dim=args.latent_dim,
-                                    num_layers=args.num_layers,
-                                    num_filters=args.num_filters,
-                                    encoder_lr=args.encoder_lr,
-                                    decoder_lr=args.decoder_lr,
-                                    decoder_weight_decay=args.decoder_weight_decay)        
-        if args.model_vector:
-            ae_models['Vector'] = dict(vector_shape=vector_shape,
-                                       hidden_dim=args.hidden_dim,
-                                       latent_dim=args.latent_dim,
-                                       num_layers=args.num_layers,
-                                       encoder_lr=args.encoder_lr,
-                                       decoder_lr=args.decoder_lr,
-                                       decoder_weight_decay=args.decoder_weight_decay)
-        if args.model_atc:
-            ae_models['ATC'] = dict(image_shape=image_shape,
-                                    latent_dim=args.latent_dim,
-                                    num_layers=args.num_layers,
-                                    num_filters=args.num_filters,
-                                    encoder_lr=args.encoder_lr,
-                                    decoder_lr=args.decoder_lr,
-                                    decoder_weight_decay=args.decoder_weight_decay)
-
-        approximator_params['q_app_params']['latent_dim'] *= len(
-            ae_models.keys())
-        agent_params['reconstruct_freq'] = args.reconstruct_frequency
         agent_params['ae_models'] = ae_models
+        agent_params['reconstruct_freq'] = args.reconstruct_frequency
         agent_params['srl_loss'] = args.use_srl_loss
         agent_params['priors'] = args.use_priors
     else:
@@ -321,7 +407,7 @@ if __name__ == '__main__':
         approximator_params['q_app_fn'] = QFeaturesNetwork\
             if args.is_pixels else QNetwork
         approximator_params['q_app_params'] = dict(
-            input_shape=agent_params['state_shape'],
+            input_shape=env_params['state_shape'],
             output_shape=agent_params['action_shape'],
             hidden_dim=args.hidden_dim)
     agent_params.update(
@@ -330,7 +416,7 @@ if __name__ == '__main__':
     # Memory buffer args
     memory_params = dict(
         buffer_size=args.memory_capacity,
-        obs_shape=agent_params['state_shape'],
+        obs_shape=env_params['state_shape'],
         action_shape=agent_params['action_shape'],
         is_multimodal=env_params['is_multimodal']
     )
@@ -353,9 +439,11 @@ if __name__ == '__main__':
     agent_params.update(dict(memory_buffer=memory_params))
 
     if args.logspath is None:
-        path_prefix = 'drone_pixels' if args.is_pixels else 'drone_vector'
+        if env_params['is_multimodal']:
+            path_prefix = 'multimodal'
+        else:
+            path_prefix = 'pixels' if args.is_pixels else 'vector'
         path_suffix = '-srl' if args.is_srl else ''
-        path_suffix += '-multi' if env_params['is_multimodal'] else ''
         timestamp = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
         # Summary folder
         outfolder = Path(f"logs_{path_prefix}/ddqn{path_suffix}_{timestamp}")

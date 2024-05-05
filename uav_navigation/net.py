@@ -68,7 +68,6 @@ class QFeaturesNetwork(nn.Module):
         self._h3 = nn.Conv2d(64, 64, kernel_size=3, stride=1)
         self._h4 = nn.Linear(3136, self.feature_dim)
 
-
         nn.init.xavier_uniform_(self._h1.weight,
                                 gain=nn.init.calculate_gain('relu'))
         nn.init.xavier_uniform_(self._h2.weight,
