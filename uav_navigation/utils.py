@@ -67,10 +67,10 @@ def do_step(agent, env, state, callback=None, must_remember=True):
         callback((state, action, reward, next_state, done, done), info)
 
     # Update the agent based on the observed transition
-    ended = done or trunc
     if must_remember:
         # Store the transition in the replay buffer if must
-        agent.memory.add(state, action, reward, next_state, ended)
+        agent.memory.add(state, action, reward, next_state, done)
+    ended = done or trunc
 
     return action, reward, next_state, ended
 

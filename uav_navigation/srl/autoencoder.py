@@ -20,6 +20,8 @@ from .net import rgb_reconstruction_model
 from .net import PixelDecoder
 from .net import PixelMDPEncoder
 from .net import vector_reconstruction_model
+from .net import VectorMDPEncoder
+from .net import VectorDecoder
 # from .net import imu2pose_model
 # from .net import slowness_cost
 # from .net import variability_cost
@@ -47,9 +49,25 @@ def profile_ae_model(ae_model, state_shape, device):
         flops, params = profile_model(decoder, feature_dim, device)
         total_flops += flops
         total_params += params
-        print('Decoder {} ({}): {} flops, {} params'.format(
+        print('Decoder {}({}): {} flops, {} params'.format(
             ae_model.type, i, *clever_format([flops, params], "%.3f")))
     return total_flops, total_params
+
+
+def instance_autoencoder(ae_type, ae_params):
+    if ae_type =='RGB':
+        ae_model = RGBModel(ae_params)
+    if ae_type =='Vector':
+        ae_model = VectorModel(ae_params)
+    if ae_type == 'VectorContrastive':
+        ae_model = VectorContrastiveModel(ae_params)
+    if ae_type =='ATC':
+        ae_model = ATCModel(ae_params)
+    if ae_type =='ATC-RGB':
+        ae_model = ATCRGBModel(ae_params)
+    if ae_params['encoder_only']:
+        ae_params['decoder_lr'] = list()        
+    return ae_model, ae_params
 
 
 class AEModel:
@@ -238,7 +256,7 @@ class AEModel:
 
 
 class RGBModel(AEModel):
-    def __init__(self, model_params, encoder_only=False):
+    def __init__(self, model_params):
         super(RGBModel, self).__init__('RGB')
         rgb_encoder, rgb_decoder = rgb_reconstruction_model(
             model_params['image_shape'],
@@ -246,7 +264,7 @@ class RGBModel(AEModel):
             num_layers=model_params['num_layers'],
             num_filters=model_params['num_filters'])
         self.encoder.append(rgb_encoder)
-        if not encoder_only:
+        if not model_params['encoder_only']:
             self.decoder.append(rgb_decoder)
         # self.avg_encoder = optim.swa_utils.AveragedModel(self.encoder[0])
 
@@ -260,7 +278,7 @@ class RGBModel(AEModel):
 
 
 class VectorModel(AEModel):
-    def __init__(self, model_params, encoder_only=False):
+    def __init__(self, model_params):
         super(VectorModel, self).__init__('Vector')
         vector_encoder, vector_decoder = vector_reconstruction_model(
             model_params['vector_shape'],
@@ -268,7 +286,7 @@ class VectorModel(AEModel):
             model_params['latent_dim'],
             num_layers=model_params['num_layers'])
         self.encoder.append(vector_encoder)
-        if not encoder_only:
+        if not model_params['encoder_only']:
             self.decoder.append(vector_decoder)
         # self.avg_encoder = optim.swa_utils.AveragedModel(self.encoder[0])
 
@@ -281,8 +299,54 @@ class VectorModel(AEModel):
         return self.compute_reconstruction_loss(obs, obs_augm, decoder_latent_lambda)
 
 
+class VectorContrastiveModel(AEModel):
+    def __init__(self, model_params):
+        super(VectorContrastiveModel, self).__init__('VectorContrastive')
+        vector_encoder = VectorMDPEncoder(model_params['vector_shape'],
+                                          model_params['latent_dim'],
+                                          model_params['hidden_dim'],
+                                          num_layers=model_params['num_layers'])        
+        self.encoder.append(vector_encoder)
+        self.momentum_encoder = VectorMDPEncoder(model_params['vector_shape'],
+                                                 model_params['latent_dim'],
+                                                 model_params['hidden_dim'],
+                                                 num_layers=model_params['num_layers'])        
+        if not model_params['encoder_only']:
+            vector_decoder = VectorDecoder(model_params['vector_shape'],
+                                           model_params['latent_dim'],
+                                           model_params['hidden_dim'],
+                                           num_layers=model_params['num_layers'])
+            self.decoder.append(vector_decoder)
+        self.loss = InfoNCE()
+        # self.avg_encoder = optim.swa_utils.AveragedModel(self.encoder[0])
+
+    def encoder_optim_step(self):
+        super().encoder_optim_step()
+        # self.avg_encoder.update_parameters(self.encoder[0])
+
+    def compute_loss(self, obs_augm, obs_t1_augm, rewards):
+        return self.compute_contrastive_loss(obs_augm, obs_t1_augm, rewards)
+    
+    def compute_contrastive_loss(self, obs_augm, obs_t1_augm, rewards):
+        """Compute Reward-guided Contrast loss function.
+        """
+        z_t = self.encoder[0].forward_code(obs_augm)  # query
+        z_t1 = self.momentum_encoder(obs_t1_augm)  # positive keys
+        nceloss = self.loss(z_t, z_t1)
+        # TODO: positive keys from positive rewards and viceversa
+        # rewards_mask = rewards > 0.
+        # z_t1_pos = z_t1[rewards_mask]
+        # z_t1_neg = z_t1[not rewards_mask]
+        # second choice
+        # z_t1_pos = z_t1.pop(rewards_mask.argmax(dim=0))
+        # z_t1_neg = z_t1
+        # nceloss = self.loss(z_t, z_t1_pos, z_t1_neg)
+        summary_scalar(f'Loss/Contrastive/{self.type}/InfoNCE', nceloss.item())
+        return nceloss
+
+
 class ATCModel(AEModel):
-    def __init__(self, model_params, encoder_only=True):
+    def __init__(self, model_params):
         super(ATCModel, self).__init__('ATC')
         self.encoder.append(PixelMDPEncoder(
             model_params['image_shape'], model_params['latent_dim'],
@@ -290,7 +354,7 @@ class ATCModel(AEModel):
         self.momentum_encoder = PixelMDPEncoder(
             model_params['image_shape'], model_params['latent_dim'],
             num_layers=model_params['num_layers'], num_filters=model_params['num_filters'])
-        if not encoder_only:
+        if not model_params['encoder_only']:
             self.decoder.append(PixelDecoder(
                 model_params['image_shape'], model_params['latent_dim'],
                 num_layers=model_params['num_layers'], num_filters=model_params['num_filters']))

@@ -128,8 +128,8 @@ class VectorEncoder(MLP):
                                               kernel_size=state_shape[-1]))
         self.feature_dim = latent_dim
         self.ln = nn.LayerNorm(self.feature_dim)
-
-    def forward(self, obs, detach=False):
+    
+    def forward_z(self, obs, detach=False):
         h = obs
         for hidden_layer in self.h_layers:
             h = hidden_layer(h)
@@ -137,11 +137,32 @@ class VectorEncoder(MLP):
                 h = torch.tanh(h.squeeze(2))
             else:
                 h = torch.relu(h)
+        return h
+
+    def forward(self, obs, detach=False):
+        h = self.forward_z(obs, detach)
         h_norm = self.ln(h)
         out = torch.tanh(h_norm)
         if detach:
             out.detach()
         return out
+
+
+class VectorMDPEncoder(VectorEncoder):
+    def __init__(self, state_shape, latent_dim, hidden_dim, num_layers=3):
+        super().__init__(state_shape, latent_dim, hidden_dim, num_layers)
+        self.contrastive = nn.Linear(latent_dim, latent_dim)
+        self.probabilities = nn.Linear(latent_dim, latent_dim)
+
+    def forward_prob(self, obs, detach=False):
+        h = self.forward_z(obs, detach=detach)
+        h_fc = self.probabilities(h)
+        return h_fc
+
+    def forward_code(self, obs, detach=False):
+        code = self.forward_z(obs, detach=detach)
+        h_fc = self.contrastive(code) + code
+        return h_fc
 
 
 class VectorDecoder(MLP):

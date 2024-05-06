@@ -159,6 +159,8 @@ def parse_srl_args(parser):
                          help='Whether if use the Pose reconstruction model.')
     arg_srl.add_argument("--model-atc", action='store_true',
                          help='Whether if use the Augmented Temporal Contrast model.')
+    arg_srl.add_argument("--model-contrastive", action='store_true',
+                         help='Whether if use the VectorContrastive model.')
     arg_srl.add_argument("--use-priors", action='store_true',
                          help='Whether if use the Prior models.')
     arg_srl.add_argument("--use-srl-loss", action='store_true',
@@ -216,6 +218,12 @@ def instance_env(args, name='webots_drone:webots_drone/DroneEnvDiscrete-v0'):
     env_params = dict()
     if isinstance(args, dict):
         env_params = args.copy()
+        if 'state_shape' in env_params.keys():
+            del env_params['state_shape']
+        if 'action_shape' in env_params.keys():
+            del env_params['action_shape']
+        if 'is_vector' in env_params.keys():
+            del env_params['is_vector']
         if 'frame_stack' in env_params.keys():
             del env_params['frame_stack']
         if 'target_dist' in env_params.keys():
@@ -319,6 +327,15 @@ def args2ae_model(args, env_params):
                                 encoder_lr=args.encoder_lr,
                                 decoder_lr=args.decoder_lr,
                                 decoder_weight_decay=args.decoder_weight_decay)
+    if args.model_contrastive:
+        assert env_params['is_vector'], 'Vector model requires is_vector flag.'
+        ae_models['VectorContrastive'] = dict(vector_shape=vector_shape,
+                                              hidden_dim=args.hidden_dim,
+                                              latent_dim=args.latent_dim,
+                                              num_layers=args.num_layers,
+                                              encoder_lr=args.encoder_lr,
+                                              decoder_lr=args.decoder_lr,
+                                              decoder_weight_decay=args.decoder_weight_decay)
     return ae_models
 
 

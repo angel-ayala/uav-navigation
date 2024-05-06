@@ -14,11 +14,8 @@ from uav_navigation.agent import QFunction
 from uav_navigation.agent import DDQNAgent
 from uav_navigation.agent import profile_q_approximator
 from uav_navigation.logger import summary_scalar
-from .autoencoder import RGBModel
-from .autoencoder import VectorModel
-from .autoencoder import ATCModel
-from .autoencoder import ATCRGBModel
 from .autoencoder import profile_ae_model
+from .autoencoder import instance_autoencoder
 from .net import weight_init
 from .priors import PriorModel
 from .priors import NorthBelief
@@ -35,7 +32,7 @@ def profile_srl_approximator(approximator, state_shape, action_shape):
         if approximator.is_multimodal:
             if any(t in m.type for t in ['RGB', 'ATC']):
                 flops, params = profile_ae_model(m, state_shape[0], approximator.device)
-            if m.type == 'VECTOR':
+            if m.type == 'Vector':
                 flops, params = profile_ae_model(m, state_shape[1], approximator.device)
         else:
             flops, params = profile_ae_model(m, state_shape, approximator.device)
@@ -75,18 +72,11 @@ class SRLFunction:
 
         self.models = list()
         for m, m_params in models.items():
-            # RGB observation reconstruction autoencoder model
-            if m =='RGB':
-                ae_model = RGBModel(m_params, encoder_only=encoder_only)
-            if m =='Vector':
-                ae_model = VectorModel(m_params, encoder_only=encoder_only)
-            if m =='ATC':
-                ae_model = ATCModel(m_params, encoder_only=encoder_only)
-            if m =='ATC-RGB':
-                ae_model = ATCRGBModel(m_params, encoder_only=encoder_only)
+            m_params['encoder_only'] = encoder_only
+            ae_model, ae_params = instance_autoencoder(m, m_params)
             self.append_autoencoder(
-                ae_model, m_params['encoder_lr'], m_params['decoder_lr'],
-                m_params['decoder_weight_decay'])
+                ae_model, ae_params['encoder_lr'], ae_params['decoder_lr'],
+                ae_params['decoder_weight_decay'])
 
     def compute_z(self, observations, latent_types=None):
         z_hat = list()
@@ -131,7 +121,9 @@ class SRLFunction:
                 loss = ae_model.compute_loss(obs_2d_augm, obs_2d_t1_augm)
             if "RGB" in ae_model.type:
                 loss = ae_model.compute_loss(obs_2d, obs_2d_augm, self.decoder_latent_lambda)
-            if "Vector" in ae_model.type:
+            if "VectorContrastive" == ae_model.type:
+                loss = ae_model.compute_loss(obs_1d, obs_1d_augm, rewards)
+            if "Vector" == ae_model.type:
                 obs_1d = self.normalize_vector(obs_1d)
                 loss = ae_model.compute_loss(obs_1d, obs_1d_augm, self.decoder_latent_lambda)
             total_loss.append(loss)
@@ -224,17 +216,11 @@ class SRLFunction:
         self.models = list()
 
         for i, (m, m_params) in enumerate(ae_models.items()):
-            if m =='RGB':
-                ae_model = RGBModel(m_params, encoder_only=encoder_only)
-            if m =='Vector':
-                ae_model = VectorModel(m_params, encoder_only=encoder_only)
-            if m =='ATC':
-                ae_model = ATCModel(m_params, encoder_only=encoder_only)
-            if m =='ATC-RGB':
-                ae_model = ATCRGBModel(m_params, encoder_only=encoder_only)
+            m_params['encoder_only'] = encoder_only
+            ae_model, ae_params = instance_autoencoder(m, m_params)
             self.append_autoencoder(
-                ae_model, m_params['encoder_lr'], m_params['decoder_lr'],
-                m_params['decoder_weight_decay'])
+                ae_model, ae_params['encoder_lr'], ae_params['decoder_lr'],
+                ae_params['decoder_weight_decay'])
             encoder, decoder = ae_model.encoder, ae_model.decoder
             encoder_opt, decoder_opt = ae_model.encoder_optim, ae_model.decoder_optim
 

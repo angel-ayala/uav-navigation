@@ -97,6 +97,7 @@ def run_evaluation(seed_val, logpath, episode):
     is_srl = agent_params['is_srl']
     del agent_params['is_srl']
     approximator_params = agent_params['approximator']
+    approximator_params['obs_space'] = env.observation_space
     if is_srl:
         agent_class = SRLDDQNAgent
         q_approximator = SRLQFunction
@@ -109,14 +110,14 @@ def run_evaluation(seed_val, logpath, episode):
         approximator_params['q_app_fn'] = QFeaturesNetwork\
             if env_params['is_pixels'] else QNetwork
 
-    print('state_shape', agent_params['state_shape'])
+    print('state_shape', env_params['state_shape'])
     print('action_shape', agent_params['action_shape'])
     # Profile the approximation function computational costs
     approximation_function = q_approximator(**approximator_params)
     if is_srl:
         approximation_function.append_autoencoders(agent_params['ae_models'])
     print('====== Full model computational demands ======')
-    function_profiler(approximation_function, agent_params['state_shape'],
+    function_profiler(approximation_function, env_params['state_shape'],
                       agent_params['action_shape'])
     del approximation_function
     # Profile encoder stage only computational costs
@@ -126,7 +127,7 @@ def run_evaluation(seed_val, logpath, episode):
         approximation_function.load(logpath / agent_paths[0],
                                     ae_models=agent_params['ae_models'],
                                     encoder_only=True)
-    function_profiler(approximation_function, agent_params['state_shape'],
+    function_profiler(approximation_function, env_params['state_shape'],
                       agent_params['action_shape'])
 
     # Instantiate an init evaluation
