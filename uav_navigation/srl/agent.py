@@ -90,9 +90,11 @@ class SRLFunction:
 
         for m in self.models:
             if latent_types is None or m.type in latent_types:
-                if any(t in m.type for t in ['RGB', 'ATC']):
+                # if any(t in m.type for t in ['RGB']):
+                if 'RGB' in m.type:
                     z = m.encode_obs(obs_2d.to(self.device))
-                if any(t in m.type for t in ['Vector', 'imu2pose']):
+                # if any(t in m.type for t in ['Vector']):
+                if 'Vector' in m.type:
                     z = m.encode_obs(obs_1d.to(self.device))
                 if z.dim() == 1:
                     z = z.unsqueeze(0)
@@ -116,16 +118,21 @@ class SRLFunction:
 
         total_loss = list()
         for ae_model in self.models:
-            if "ATC" in ae_model.type:
-                ae_model.update_momentum_encoder(0.01)
-                loss = ae_model.compute_loss(obs_2d_augm, obs_2d_t1_augm)
             if "RGB" in ae_model.type:
-                loss = ae_model.compute_loss(obs_2d, obs_2d_augm, self.decoder_latent_lambda)
-            if "VectorContrastive" == ae_model.type:
-                loss = ae_model.compute_loss(obs_1d, obs_1d_augm, rewards)
-            if "Vector" == ae_model.type:
-                obs_1d = self.normalize_vector(obs_1d)
-                loss = ae_model.compute_loss(obs_1d, obs_1d_augm, self.decoder_latent_lambda)
+                if "ATC" in ae_model.type:
+                    loss = ae_model.compute_contrastive_loss(obs_2d_augm, obs_2d_t1_augm)
+                    ae_model.update_momentum_encoder(0.01)
+                else:
+                    loss = ae_model.compute_reconstruction_loss(obs_2d, obs_2d_augm, self.decoder_latent_lambda)
+            if "Vector" in ae_model.type:
+                if "ATC" in ae_model.type:
+                    # obs_1d_augm = self.normalize_vector(obs_1d_augm)
+                    # obs_1d_t1_augm = self.normalize_vector(obs_1d_t1_augm)
+                    loss = ae_model.compute_contrastive_loss(obs_1d_augm, obs_1d_t1_augm, rewards)
+                    ae_model.update_momentum_encoder(0.01)
+                else:
+                    obs_1d = self.normalize_vector(obs_1d)
+                    loss = ae_model.compute_reconstruction_loss(obs_1d, obs_1d_augm, self.decoder_latent_lambda)
             total_loss.append(loss)
         tloss = torch.sum(torch.stack(total_loss))
         summary_scalar("Loss/AutoEncoders", tloss.item())

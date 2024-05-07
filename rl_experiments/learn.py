@@ -329,13 +329,13 @@ def args2ae_model(args, env_params):
                                 decoder_weight_decay=args.decoder_weight_decay)
     if args.model_contrastive:
         assert env_params['is_vector'], 'Vector model requires is_vector flag.'
-        ae_models['VectorContrastive'] = dict(vector_shape=vector_shape,
-                                              hidden_dim=args.hidden_dim,
-                                              latent_dim=args.latent_dim,
-                                              num_layers=args.num_layers,
-                                              encoder_lr=args.encoder_lr,
-                                              decoder_lr=args.decoder_lr,
-                                              decoder_weight_decay=args.decoder_weight_decay)
+        ae_models['VectorATC'] = dict(vector_shape=vector_shape,
+                                      hidden_dim=args.hidden_dim,
+                                      latent_dim=args.latent_dim,
+                                      num_layers=args.num_layers,
+                                      encoder_lr=args.encoder_lr,
+                                      decoder_lr=args.decoder_lr,
+                                      decoder_weight_decay=args.decoder_weight_decay)
     return ae_models
 
 

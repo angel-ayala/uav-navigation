@@ -59,8 +59,8 @@ def instance_autoencoder(ae_type, ae_params):
         ae_model = RGBModel(ae_params)
     if ae_type =='Vector':
         ae_model = VectorModel(ae_params)
-    if ae_type == 'VectorContrastive':
-        ae_model = VectorContrastiveModel(ae_params)
+    if ae_type == 'VectorATC':
+        ae_model = VectorATCModel(ae_params)
     if ae_type =='ATC':
         ae_model = ATCModel(ae_params)
     if ae_type =='ATC-RGB':
@@ -299,9 +299,9 @@ class VectorModel(AEModel):
         return self.compute_reconstruction_loss(obs, obs_augm, decoder_latent_lambda)
 
 
-class VectorContrastiveModel(AEModel):
+class VectorATCModel(AEModel):
     def __init__(self, model_params):
-        super(VectorContrastiveModel, self).__init__('VectorContrastive')
+        super(VectorATCModel, self).__init__('VectorATC')
         vector_encoder = VectorMDPEncoder(model_params['vector_shape'],
                                           model_params['latent_dim'],
                                           model_params['hidden_dim'],
@@ -323,6 +323,12 @@ class VectorContrastiveModel(AEModel):
     def encoder_optim_step(self):
         super().encoder_optim_step()
         # self.avg_encoder.update_parameters(self.encoder[0])
+    
+    def update_momentum_encoder(self, tau):
+        # Soft update the target network
+        soft_update_params(net=self.encoder[0],
+                           target_net=self.momentum_encoder,
+                           tau=tau)
 
     def compute_loss(self, obs_augm, obs_t1_augm, rewards):
         return self.compute_contrastive_loss(obs_augm, obs_t1_augm, rewards)
@@ -389,7 +395,7 @@ class ATCModel(AEModel):
         # TODO: positive keys from positive rewards and viceversa
         nceloss = self.loss(z_t, z_t1)
         summary_scalar(f'Loss/Contrastive/{self.type}/InfoNCE', nceloss.item())
-        return nceloss * 1e-8
+        return nceloss
 
 
 class ATCRGBModel(ATCModel):
