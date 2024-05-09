@@ -107,14 +107,14 @@ class QFunction(GenericFunction):
         super(QFunction, self).__init__(obs_space, use_cuda,
                                         is_pixels, is_multimodal, use_augmentation)
 
-        self.tau = tau
         # Q-networks
+        self.tau = 1.
         self.q_network = q_app_fn(**q_app_params).to(self.device)
         self.target_q_network = q_app_fn(**q_app_params).to(self.device)
 
         # Initialize target network with same Q-network parameters
-        self.target_q_network.load_state_dict(self.q_network.state_dict())
-
+        self.update_target_network()
+        self.tau = tau
         # optimization function
         self.loss_fn = nn.SmoothL1Loss(reduction='none')
         # self.optimizer = optim.SGD(self.q_network.parameters(),

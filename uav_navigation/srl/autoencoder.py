@@ -28,7 +28,7 @@ from .net import VectorDecoder
 # from .net import proportionality_cost
 # from .net import repeatability_cost
 from .net import adabelief_optimizer
-from .loss import SSIM_Loss
+# from .loss import SSIM_Loss
 # from .net import logarithmic_difference_loss
 # from .net import BiGRU
 from ..logger import log_image_batch
@@ -80,7 +80,7 @@ class AEModel:
         self.decoder = list()
 
         self.n_calls = 0
-        self.ssim_loss = SSIM_Loss(data_range=1.0, size_average=True, channel=3, nonnegative_ssim=True)
+        # self.ssim_loss = SSIM_Loss(data_range=1.0, size_average=True, channel=3, nonnegative_ssim=True)
 
     def adam_optimizer(self, encoders_lr, decoders_lr, decoder_weight_decay):
         if type(encoders_lr) is not list:
@@ -318,11 +318,12 @@ class VectorATCModel(AEModel):
                                            num_layers=model_params['num_layers'])
             self.decoder.append(vector_decoder)
         self.loss = InfoNCE()
+        self.update_momentum_encoder(1.)
         # self.avg_encoder = optim.swa_utils.AveragedModel(self.encoder[0])
 
-    def encoder_optim_step(self):
-        super().encoder_optim_step()
-        # self.avg_encoder.update_parameters(self.encoder[0])
+    # def encoder_optim_step(self):
+    #     super().encoder_optim_step()
+    #     self.avg_encoder.update_parameters(self.encoder[0])
     
     def update_momentum_encoder(self, tau):
         # Soft update the target network
@@ -334,12 +335,14 @@ class VectorATCModel(AEModel):
         return self.compute_contrastive_loss(obs_augm, obs_t1_augm, rewards)
     
     def compute_contrastive_loss(self, obs_augm, obs_t1_augm, rewards):
-        """Compute Reward-guided Contrast loss function.
+        """Compute Augmented Temporal Contrast loss function.
+
+        based on https://arxiv.org/pdf/2009.08319.pdf
         """
         z_t = self.encoder[0].forward_code(obs_augm)  # query
         z_t1 = self.momentum_encoder(obs_t1_augm)  # positive keys
         nceloss = self.loss(z_t, z_t1)
-        # TODO: positive keys from positive rewards and viceversa
+        # TODO: positive keys from positive rewards and viceversa as improve
         # rewards_mask = rewards > 0.
         # z_t1_pos = z_t1[rewards_mask]
         # z_t1_neg = z_t1[not rewards_mask]
