@@ -45,22 +45,22 @@ class GenericFunction:
 
     def normalize_obs(self, obs):
         if self.is_multimodal:
-            return (obs[0] / self.obs_space[0].high,
-                    obs[1] / self.obs_space[1].high)
+            return (obs[0] / torch.tensor(self.obs_space[0].high, device=self.device),
+                    obs[1] / torch.tensor(self.obs_space[1].high, device=self.device))
         else:
-            return obs / self.obs_space.high
+            return obs / torch.tensor(self.obs_space.high, device=self.device)
 
     def normalize_image(self, obs):
         if self.is_multimodal:
-            return obs[0] / self.obs_space[0].high
+            return obs[0] / torch.tensor(self.obs_space[0].high, device=self.device)
         else:
-            return obs / self.obs_space.high
+            return obs / torch.tensor(self.obs_space.high, device=self.device)
 
     def normalize_vector(self, obs):
         if self.is_multimodal:
-            return obs[1] / self.obs_space[1].high
+            return obs[1] / torch.tensor(self.obs_space[1].high, device=self.device)
         else:
-            return obs / self.obs_space.high
+            return obs / torch.tensor(self.obs_space.high, device=self.device)
 
     def augment_image(self, obs_2d):
         if self.augment_model:
