@@ -321,10 +321,14 @@ class VectorATCModel(AEModel):
         self.update_momentum_encoder(1.)
         # self.avg_encoder = optim.swa_utils.AveragedModel(self.encoder[0])
 
+    def to(self, device):
+        super().to(device)
+        self.momentum_encoder.to(device)
+
     # def encoder_optim_step(self):
     #     super().encoder_optim_step()
     #     self.avg_encoder.update_parameters(self.encoder[0])
-    
+
     def update_momentum_encoder(self, tau):
         # Soft update the target network
         soft_update_params(net=self.encoder[0],
