@@ -68,6 +68,8 @@ def parse_environment_args(parser):
                          help='Whether if reconstruct an image-based observation.')
     arg_env.add_argument("--is-vector", action='store_true',
                          help='Whether if reconstruct a vector-based observation.')
+    arg_env.add_argument("--add-target-pos", action='store_true',
+                         help='Whether if add the target position to vector state.')
     arg_env.add_argument("--add-target-dist", action='store_true',
                          help='Whether if add the target distance to vector state.')
     arg_env.add_argument("--add-target-dim", action='store_true',
@@ -214,7 +216,8 @@ def parse_args():
     return parser.parse_args()
 
 
-def instance_env(args, name='webots_drone:webots_drone/DroneEnvDiscrete-v0'):
+def instance_env(args, name='webots_drone:webots_drone/DroneEnvDiscrete-v0',
+                 seed=666):
     env_params = dict()
     if isinstance(args, dict):
         env_params = args.copy()
@@ -250,12 +253,14 @@ def instance_env(args, name='webots_drone:webots_drone/DroneEnvDiscrete-v0'):
 
     # Create the environment
     env = gym.make(name, **env_params)
+    env.seed(seed)
 
     if not isinstance(args, dict):
         env_params['frame_stack'] = args.frame_stack
         env_params['is_multimodal'] = args.is_pixels and args.is_vector
         env_params['is_vector'] = args.is_vector
         env_params['target_dist'] = args.add_target_dist
+        env_params['target_pos'] = args.add_target_pos
         env_params['target_dim'] = args.add_target_dim
         env_params['action2obs'] = args.add_action
         env_params['uav_data'] = args.uav_data
@@ -276,6 +281,7 @@ def wrap_env(env, env_params):
     elif not env_params['is_pixels']:
         env = CustomVectorObservation(env, uav_data=env_params['uav_data'],
                                       target_dist=env_params['target_dist'],
+                                      target_pos=env_params['target_pos'],
                                       target_dim=env_params['target_dim'],
                                       add_action=env_params['action2obs'])
 
@@ -372,7 +378,7 @@ if __name__ == '__main__':
 
     # Environment
     environment_name = 'webots_drone:webots_drone/DroneEnvDiscrete-v0'
-    env, env_params = instance_env(args, environment_name)
+    env, env_params = instance_env(args, environment_name, seed=args.seed)
     # Observation preprocessing
     env, env_params = wrap_env(env, env_params)
 

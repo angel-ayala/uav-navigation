@@ -351,7 +351,7 @@ class VectorATCModel(AEModel):
         # z_t1_neg = z_t1
         # nceloss = self.loss(z_t, z_t1_pos, z_t1_neg)
         summary_scalar(f'Loss/Contrastive/{self.type}/InfoNCE', nceloss.item())
-        return nceloss
+        return nceloss * 1e-4
 
 
 class ATCModel(AEModel):

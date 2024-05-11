@@ -11,10 +11,10 @@ https://arxiv.org/abs/1910.01741
 import torch
 from torch import nn
 from torch import optim
-from torch.nn import functional as F
+# from torch.nn import functional as F
 from adabelief_pytorch import AdaBelief
 
-from .loss import circular_difference
+# from .loss import circular_difference
 
 
 OUT_DIM = {2: 39, 4: 35, 6: 31}
@@ -22,11 +22,16 @@ OUT_DIM = {2: 39, 4: 35, 6: 31}
 
 def weight_init(m):
     """Custom weight init for Conv2D and Linear layers."""
-    # if isinstance(m, nn.Linear):
-    if type(m) == nn.Linear:
+    if isinstance(m, nn.Linear):
         nn.init.orthogonal_(m.weight.data)
+        m.bias.data.fill_(0.0)        
+    elif isinstance(m, (nn.Conv1d, nn.ConvTranspose1d)):
+        m.weight.data.fill_(0.0)
         m.bias.data.fill_(0.0)
-    elif isinstance(m, nn.Conv2d) or isinstance(m, nn.ConvTranspose2d):
+        mid = m.weight.size(2) // 2
+        gain = nn.init.calculate_gain('relu')
+        nn.init.orthogonal_(m.weight.data[:, :, mid], gain)
+    elif isinstance(m, (nn.Conv2d, nn.ConvTranspose2d)):
         # delta-orthogonal init from https://arxiv.org/pdf/1806.05393.pdf
         assert m.weight.size(2) == m.weight.size(3)
         m.weight.data.fill_(0.0)
@@ -96,22 +101,18 @@ def q_function(latent_dim, action_shape, hidden_dim, num_layers=2):
 class MLP(nn.Module):
     """MLP for q-function."""
 
-    def __init__(self, n_input, n_output, hidden_dim, num_layers=3):
-        super().__init__()
+    def __init__(self, n_input, n_output, hidden_dim, num_layers=2):
+        super(MLP, self).__init__()
         self.h_layers = nn.ModuleList([nn.Linear(n_input, hidden_dim)])
-        for i in range(num_layers - 1):
+        for i in range(num_layers - 2):
             self.h_layers.append(nn.Linear(hidden_dim, hidden_dim))
-        self.h_layers.append(nn.Dropout(0.2))
         self.h_layers.append(nn.Linear(hidden_dim, n_output))
         self.num_layers = len(self.h_layers)
 
     def forward(self, obs, detach=False):
         h = obs
-        for i in range(self.num_layers):
-            if isinstance(self.h_layers[i], nn.Dropout):
-                h = self.h_layers[i](h)
-            else:
-                h = torch.relu(self.h_layers[i](h))
+        for h_layer in self.h_layers:
+            h = torch.relu(h_layer(h))
 
         if detach:
             h = h.detach()
@@ -120,23 +121,23 @@ class MLP(nn.Module):
 
 
 class VectorEncoder(MLP):
-    def __init__(self, state_shape, latent_dim, hidden_dim, num_layers=3):
-        super().__init__(state_shape[-1], latent_dim, hidden_dim,
-                         num_layers=num_layers-1)
+    def __init__(self, state_shape, latent_dim, hidden_dim, num_layers=2):
+        super(VectorEncoder, self).__init__(
+            state_shape[-1], latent_dim, hidden_dim, num_layers=num_layers)
         if len(state_shape) == 2:
-            self.h_layers.insert(0, nn.Conv1d(state_shape[0], state_shape[-1],
-                                              kernel_size=state_shape[-1]))
+            self.h_layers[0] = nn.Conv1d(state_shape[0], hidden_dim,
+                                         kernel_size=state_shape[-1])
         self.feature_dim = latent_dim
         self.ln = nn.LayerNorm(self.feature_dim)
-    
+
     def forward_z(self, obs, detach=False):
         h = obs
         for hidden_layer in self.h_layers:
-            h = hidden_layer(h)
+            h = torch.relu(hidden_layer(h))
             if isinstance(hidden_layer, nn.Conv1d):
-                h = torch.tanh(h.squeeze(2))
-            else:
-                h = torch.relu(h)
+                h = h.squeeze(2)
+        if detach:
+            h.detach()
         return h
 
     def forward(self, obs, detach=False):
@@ -149,31 +150,24 @@ class VectorEncoder(MLP):
 
 
 class VectorMDPEncoder(VectorEncoder):
-    def __init__(self, state_shape, latent_dim, hidden_dim, num_layers=3):
-        super().__init__(state_shape, latent_dim, hidden_dim, num_layers)
+    def __init__(self, state_shape, latent_dim, hidden_dim, num_layers=2):
+        super(VectorMDPEncoder, self).__init__(
+            state_shape, latent_dim, hidden_dim, num_layers)
         self.contrastive = nn.Linear(latent_dim, latent_dim)
-        self.probabilities = nn.Linear(latent_dim, latent_dim)
-
-    def forward_prob(self, obs, detach=False):
-        h = self.forward_z(obs, detach=detach)
-        h_fc = self.probabilities(h)
-        return h_fc
 
     def forward_code(self, obs, detach=False):
-        code = self.forward_z(obs, detach=detach)
+        code = self.forward(obs, detach=detach)
         h_fc = self.contrastive(code) + code
         return h_fc
 
 
 class VectorDecoder(MLP):
-    def __init__(self, state_shape, latent_dim, hidden_dim, num_layers=3):
-        super().__init__(latent_dim, state_shape[-1], hidden_dim,
-                         num_layers=num_layers-1)
+    def __init__(self, state_shape, latent_dim, hidden_dim, num_layers=2):
+        super(VectorDecoder, self).__init__(
+            latent_dim, state_shape[-1], hidden_dim, num_layers=num_layers)
         if len(state_shape) == 2:
             self.h_layers[-1] = nn.ConvTranspose1d(hidden_dim, state_shape[0],
                                                    kernel_size=state_shape[-1])
-        else:
-            self.h_layers[-1] = nn.Linear(hidden_dim, state_shape[-1])
 
     def forward(self, obs, detach=False):
         h = obs

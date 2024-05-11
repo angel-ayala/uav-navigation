@@ -124,16 +124,18 @@ class SRLFunction:
                     ae_model.update_momentum_encoder(0.01)
                 else:
                     loss = ae_model.compute_reconstruction_loss(obs_2d, obs_2d_augm, self.decoder_latent_lambda)
+                total_loss.append(loss)
             if "Vector" in ae_model.type:
                 if "ATC" in ae_model.type:
                     # obs_1d_augm_norm = self.normalize_vector(obs_1d_augm)
                     # obs_1d_t1_augm = self.normalize_vector(obs_1d_t1_augm)
                     loss = ae_model.compute_contrastive_loss(obs_1d_augm, obs_1d_t1_augm, rewards)
                     ae_model.update_momentum_encoder(0.01)
+                    total_loss.append(loss)
                 # else:
                 obs_1d = self.normalize_vector(obs_1d)
                 loss = ae_model.compute_reconstruction_loss(obs_1d, obs_1d_augm, self.decoder_latent_lambda)
-            total_loss.append(loss)
+                total_loss.append(loss)
         tloss = torch.sum(torch.stack(total_loss))
         summary_scalar("Loss/AutoEncoders", tloss.item())
         return tloss
