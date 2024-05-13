@@ -93,8 +93,6 @@ class SRLFunction:
                 if 'RGB' in m.type:
                     z = m.encode_obs(obs_2d.to(self.device))
                 if 'Vector' in m.type:
-                    # if 'ATC' in m.type:
-                    #     obs_1d = self.normalize_vector(obs_1d)
                     z = m.encode_obs(obs_1d.to(self.device))
                 if z.dim() == 1:
                     z = z.unsqueeze(0)
@@ -123,7 +121,7 @@ class SRLFunction:
                     loss = ae_model.compute_contrastive_loss(obs_2d_augm, obs_2d_t1_augm)
                     ae_model.update_momentum_encoder(0.01)
                 else:
-                    loss = ae_model.compute_reconstruction_loss(obs_2d, obs_2d_augm, self.decoder_latent_lambda)
+                    loss = ae_model.compute_reconstruction_loss(obs_2d, obs_2d_augm, self.decoder_latent_lambda, pixel_obs_log=True)
                 total_loss.append(loss)
             if "Vector" in ae_model.type:
                 if "ATC" in ae_model.type:

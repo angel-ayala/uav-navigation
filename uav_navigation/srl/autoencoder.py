@@ -71,7 +71,7 @@ def instance_autoencoder(ae_type, ae_params):
 
 
 class AEModel:
-    LOG_FREQ = 50
+    LOG_FREQ = 1000
 
     def __init__(self, ae_type): #, ae_params, encoder_only=False):
         self.type = ae_type
@@ -246,11 +246,10 @@ class AEModel:
 
         rloss = rec_loss + decoder_latent_lambda * latent_loss
 
-        if pixel_obs_log:
+        if pixel_obs_log and self.n_calls % self.LOG_FREQ == 0:
             log_image_batch(obs, "Agent/observation")
             log_image_batch(obs_augm, "Agent/observation_augm")
             log_image_batch(rec_obs, "Agent/reconstruction")
-
         self.n_calls += 1
         return rloss
 
