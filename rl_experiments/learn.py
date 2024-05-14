@@ -239,6 +239,8 @@ def instance_env(args, name='webots_drone:webots_drone/DroneEnvDiscrete-v0',
             del env_params['uav_data']
         if 'is_multimodal' in env_params.keys():
             del env_params['is_multimodal']
+        if 'target_pos' in env_params.keys():
+            del env_params['target_pos']
     else:
         env_params = dict(
             time_limit_seconds=args.time_limit,

@@ -8,24 +8,24 @@ Based on:
 "Improving Sample Efficiency in Model-Free Reinforcement Learning from Images"
 https://arxiv.org/abs/1910.01741
 """
-import torch
-from torchvision.transforms import AutoAugment
+# import torch
+# from torchvision.transforms import AutoAugment
 # from torchvision.transforms import AugMix
 from thop import clever_format
 from .agent import ACFunction
 from .agent import SACAgent
 from .agent import profile_actor_critic
-from ..logger import summary_scalar
+# from ..logger import summary_scalar
 from ..srl.agent import SRLAgent
 from ..srl.agent import SRLFunction
-from ..srl.net import weight_init
-from ..srl.net import PriorModel
-from ..srl.net import NorthBelief
-from ..srl.net import PositionBelief
-from ..srl.net import OrientationBelief
-from ..srl.autoencoder import AEModel
-from ..srl.autoencoder import RGBModel
-from ..srl.autoencoder import ATCModel
+# from ..srl.net import weight_init
+# from ..srl.priors import PriorModel
+# from ..srl.priors import NorthBelief
+# from ..srl.priors import PositionBelief
+# from ..srl.priors import OrientationBelief
+# from ..srl.autoencoder import AEModel
+# from ..srl.autoencoder import RGBModel
+# from ..srl.autoencoder import ATCModel
 from ..srl.autoencoder import profile_ae_model
 
 
@@ -56,7 +56,7 @@ def profile_srl_approximator(approximator, state_shape, action_shape):
 
 
 class SRLSACFunction(ACFunction, SRLFunction):
-    def __init__(self, latent_dim, action_shape,                 
+    def __init__(self, latent_dim, action_shape, obs_space,       
                  hidden_dim=256,
                  init_temperature=0.01,
                  alpha_lr=1e-3,
@@ -78,7 +78,7 @@ class SRLSACFunction(ACFunction, SRLFunction):
                  use_augmentation=True,
                  encoder_tau=0.995,
                  decoder_latent_lambda=1e-6,):
-        ACFunction.__init__(self, latent_dim, action_shape,
+        ACFunction.__init__(self, latent_dim, action_shape, obs_space,
                             hidden_dim,
                             init_temperature,
                             alpha_lr,
@@ -104,10 +104,6 @@ class SRLSACFunction(ACFunction, SRLFunction):
     def action_inference(self, obs, sample=False):
         obs = self.compute_z(obs).detach()
         return super().action_inference(obs, sample=sample)
-    
-    def compute_td_error(self, obs, action, reward, beta):
-        obs = self.compute_z(obs).detach()
-        return super().compute_td_error(obs, action, reward, beta)
     
     def update_critic(self, discount, obs, action, reward, next_obs, not_done, weight=None):
         obs = self.compute_z(obs)
@@ -135,13 +131,14 @@ class SRLSACFunction(ACFunction, SRLFunction):
 
 
 class SRLSACAgent(SACAgent, SRLAgent):
-    def __init__(self, state_shape, action_shape, approximator, ae_models,
-                 discount_factor=0.99, memory_buffer=None, reconstruct_freq=1,
-                 srl_loss=False, priors=False):
-        SACAgent.__init__(self, state_shape, action_shape, approximator,
-                          discount_factor, memory_buffer)
+    def __init__(self, action_shape, approximator, ae_models,
+                 discount_factor=0.99, memory_buffer=None, batch_size=128,
+                 reconstruct_freq=1, srl_loss=False, priors=False,
+                 encoder_only=False):
+        SACAgent.__init__(self, action_shape, approximator,
+                          discount_factor, memory_buffer, batch_size)
         SRLAgent.__init__(self, ae_models, reconstruct_freq=reconstruct_freq,
-                          srl_loss=srl_loss, priors=priors)
+                          srl_loss=srl_loss, priors=priors, encoder_only=encoder_only)
 
     def update(self, step):
         SACAgent.update(self, step)

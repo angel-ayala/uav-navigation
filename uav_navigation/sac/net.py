@@ -100,20 +100,20 @@ class DiagGaussianActor(nn.Module):
         super().__init__()
 
         self.log_std_bounds = log_std_bounds
-        hidden_dim1 = hidden_dim
+        # hidden_dim1 = hidden_dim
         if isinstance(obs_dim, int):
             f_layer = [nn.Linear(obs_dim, hidden_dim), nn.ReLU(inplace=True)]            
         elif len(obs_dim) == 2:
             f_layer = [nn.LSTM(obs_dim[-1], hidden_dim, num_layers=1,
-                               batch_first=True, bidirectional=True)]
-            hidden_dim1 = hidden_dim * 2
+                               batch_first=True, bidirectional=False)]
+            # hidden_dim1 = hidden_dim #* 2
         elif len(obs_dim) == 1:
             f_layer = [nn.Linear(obs_dim[-1], hidden_dim), nn.ReLU(inplace=True)]            
         else:
             raise NotImplementedError("First layer not implemented.")
         self.f_layer = nn.Sequential(*f_layer)
         self.trunk = nn.Sequential(
-            nn.Linear(hidden_dim1, hidden_dim),  nn.ReLU(inplace=True),
+            nn.Linear(hidden_dim, hidden_dim),  nn.ReLU(inplace=True),
             nn.Linear(hidden_dim, 2 * action_dim)
         )
 
@@ -121,9 +121,10 @@ class DiagGaussianActor(nn.Module):
 
     def forward(self, obs):
         if isinstance(self.f_layer[0], nn.LSTM):
-            h, _ = self.f_layer(obs)
+            # process hidden states
+            _, (h, _)= self.f_layer(obs)
+            h = h.squeeze(0)
             h = torch.relu(h)
-            h = h[:, -1, :]
         else:
             h = self.f_layer(obs)
 

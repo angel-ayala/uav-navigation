@@ -47,7 +47,7 @@ def profile_actor_critic(approximator, state_shape, action_shape):
 
 
 class ACFunction(GenericFunction):
-    def __init__(self, latent_dim, action_shape,
+    def __init__(self, latent_dim, action_shape, obs_space,
                  hidden_dim=256,
                  init_temperature=0.01,
                  alpha_lr=1e-3,
@@ -69,8 +69,8 @@ class ACFunction(GenericFunction):
                  use_augmentation=True,
                  preprocess=False):
 
-        super(ACFunction, self).__init__(use_cuda, is_pixels, is_multimodal,
-                                         use_augmentation)
+        super(ACFunction, self).__init__(obs_space, use_cuda, is_pixels,
+                                         is_multimodal, use_augmentation)
 
         self.critic_tau = critic_tau
         self.actor_update_freq = actor_update_freq
@@ -81,17 +81,17 @@ class ACFunction(GenericFunction):
                                        log_std_bounds=[actor_log_std_min, actor_log_std_max]).to(self.device)
         self.action_range = torch.tensor(actor_min_a), torch.tensor(actor_max_a)
 
+        self.preprocess = preprocess
         self.critic = Critic(latent_dim, action_shape, hidden_dim, preprocess).to(self.device)
         self.critic_target = Critic(latent_dim, action_shape, hidden_dim, preprocess).to(self.device)
 
         # Initialize target network with Q-network parameters
         self.critic_target.load_state_dict(self.critic.state_dict())
 
-        self.log_alpha = torch.tensor(0., dtype=torch.float32).to(self.device)
-        self.log_alpha.requires_grad = True
+        self.log_alpha = torch.zeros(1, dtype=torch.float32, device=self.device, requires_grad=True)
+        # self.log_alpha.requires_grad = True
         # set target entropy to -|A|
         self.target_entropy = -np.prod(action_shape)
-        self.preprocess = preprocess
 
         # optimizers
         self.actor_optimizer = torch.optim.Adam(
@@ -191,14 +191,17 @@ class ACFunction(GenericFunction):
 
     def save(self, path):
         ac_app_path = str(path) + "_actor_critic.pth"
-        torch.save({
+        model_chkpt = {
             'actor_state_dict': self.actor.state_dict(),
             'critic_state_dict': self.critic.state_dict(),
             'critic_target_state_dict': self.critic_target.state_dict(),
             'actor_optimizer_state_dict': self.actor_optimizer.state_dict(),
             'critic_optimizer_state_dict': self.critic_optimizer.state_dict(),
-            'log_alpha_optimizer_state_dict': self.log_alpha_optimizer.state_dict(),
-        }, ac_app_path)
+            'log_alpha_optimizer_state_dict': self.log_alpha_optimizer.state_dict()
+            }
+        if self.preprocess:
+            model_chkpt['preprocess_dict'] = self.preprocess.state_dict()
+        torch.save(model_chkpt, ac_app_path)
 
     def load(self, path, eval_only=True):
         ac_app_path = str(path) + "_actor_critic.pth"
@@ -206,6 +209,9 @@ class ACFunction(GenericFunction):
         self.actor.load_state_dict(checkpoint['actor_state_dict'])
         self.critic.load_state_dict(checkpoint['critic_state_dict'])
         self.critic_target.load_state_dict(checkpoint['critic_target_state_dict'])
+        if 'preprocess_dict' in checkpoint.keys():
+            self.preprocess.load_state_dict(checkpoint['preprocess_dict'])
+
         if not eval_only:
             self.actor_optimizer.load_state_dict(checkpoint['actor_optimizer_state_dict'])
             self.critic_optimizer.load_state_dict(checkpoint['critic_optimizer_state_dict'])
@@ -218,25 +224,25 @@ class ACFunction(GenericFunction):
 
 class SACAgent(GenericAgent):
     def __init__(self,
-                 state_shape,
                  action_shape,
                  approximator,
                  discount_factor=0.99,
-                 memory_buffer=None):
-        super(SACAgent, self).__init__(state_shape, action_shape, approximator,
-                                       discount_factor, memory_buffer)
+                 memory_buffer=None,
+                 batch_size=128):
+        super(SACAgent, self).__init__(action_shape, approximator,
+                                       discount_factor, memory_buffer, batch_size)
         if self.is_prioritized:
             self.memory.update_beta(0)
 
     def select_action(self, state, sample=True):
-        state = self.approximator.format_obs(state)
         with torch.no_grad():
+            state = self.approximator.format_obs(state)
             action = self.approximator.action_inference(state, sample=sample)
         return action
 
     def update_sac(self, step):
         sampled_data = self.memory.sample(
-                self.BATCH_SIZE, device=self.approximator.device)
+                self.batch_size, device=self.approximator.device)
         if self.is_prioritized:
             obs, actions, rewards, obs_t1, dones = sampled_data[0]
             loss_weights = sampled_data[1]['weights']
@@ -251,13 +257,13 @@ class SACAgent(GenericAgent):
         if step % self.approximator.actor_update_freq == 0:
             self.approximator.update_actor_and_alpha(obs, weight=loss_weights)
 
+        td_errors = td_errors.squeeze().cpu().numpy()
+        td_errors = np.abs(td_errors) + 1e-6
+        summary_scalar('Loss/TDError', td_errors.mean())
         if self.is_prioritized:
             # https://link.springer.com/article/10.1007/s11370-024-00514-9
-            new_priorities = td_errors.squeeze().cpu().numpy()
-            new_priorities = np.abs(new_priorities) + 1e-6
-            summary_scalar('Loss/TDError', new_priorities.mean())
             self.memory.update_priorities(sampled_data[1]['indexes'],
-                                          new_priorities)
+                                          td_errors)
 
     def update(self, step):
         if self.is_prioritized:
