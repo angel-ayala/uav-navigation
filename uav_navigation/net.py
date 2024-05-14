@@ -10,10 +10,17 @@ import torch.nn as nn
 
 
 def weight_init(m):
-    if isinstance(m, (nn.Linear, nn.Conv1d)):
+    """Custom weight init for Conv2D and Linear layers."""
+    if isinstance(m, nn.Linear):
         nn.init.orthogonal_(m.weight.data)
         m.bias.data.fill_(0.0)
-    elif isinstance(m, nn.Conv2d) or isinstance(m, nn.ConvTranspose2d):
+    elif isinstance(m, (nn.Conv1d, nn.ConvTranspose1d)):
+        m.weight.data.fill_(0.0)
+        m.bias.data.fill_(0.0)
+        mid = m.weight.size(2) // 2
+        gain = nn.init.calculate_gain('relu')
+        nn.init.orthogonal_(m.weight.data[:, :, mid], gain)
+    elif isinstance(m, (nn.Conv2d, nn.ConvTranspose2d)):
         # delta-orthogonal init from https://arxiv.org/pdf/1806.05393.pdf
         assert m.weight.size(2) == m.weight.size(3)
         m.weight.data.fill_(0.0)
@@ -103,32 +110,3 @@ class QFeaturesNetwork(nn.Module):
             q_acted = torch.squeeze(q.gather(1, action.long()))
 
             return q_acted
-
-
-class DuelingQNetwork(nn.Module):
-    def __init__(self, input_shape, output_shape, fc1_units=64, fc2_units=64):
-        super(DuelingQNetwork, self).__init__()
-        state_size = input_shape[0]
-        action_size = output_shape[0]
-        self.fc_val = nn.Sequential(
-            nn.Linear(state_size, fc1_units),
-            nn.ReLU(),
-            nn.Linear(fc1_units, fc2_units),
-            nn.ReLU(),
-            nn.Linear(fc2_units, 1)
-        )
-
-        self.fc_adv = nn.Sequential(
-            nn.Linear(state_size, fc1_units),
-            nn.ReLU(),
-            nn.Linear(fc1_units, fc2_units),
-            nn.ReLU(),
-            nn.Linear(fc2_units, action_size)
-        )
-
-    def forward(self, state):
-        val = self.fc_val(state)
-        adv = self.fc_adv(state)
-
-        # Dueling Network: combine value and advantage streams
-        return val + (adv - adv.mean(dim=1, keepdim=True))

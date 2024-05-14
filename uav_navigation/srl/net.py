@@ -11,34 +11,10 @@ https://arxiv.org/abs/1910.01741
 import torch
 from torch import nn
 from torch import optim
-# from torch.nn import functional as F
 from adabelief_pytorch import AdaBelief
-
-# from .loss import circular_difference
 
 
 OUT_DIM = {2: 39, 4: 35, 6: 31}
-
-
-def weight_init(m):
-    """Custom weight init for Conv2D and Linear layers."""
-    if isinstance(m, nn.Linear):
-        nn.init.orthogonal_(m.weight.data)
-        m.bias.data.fill_(0.0)        
-    elif isinstance(m, (nn.Conv1d, nn.ConvTranspose1d)):
-        m.weight.data.fill_(0.0)
-        m.bias.data.fill_(0.0)
-        mid = m.weight.size(2) // 2
-        gain = nn.init.calculate_gain('relu')
-        nn.init.orthogonal_(m.weight.data[:, :, mid], gain)
-    elif isinstance(m, (nn.Conv2d, nn.ConvTranspose2d)):
-        # delta-orthogonal init from https://arxiv.org/pdf/1806.05393.pdf
-        assert m.weight.size(2) == m.weight.size(3)
-        m.weight.data.fill_(0.0)
-        m.bias.data.fill_(0.0)
-        mid = m.weight.size(2) // 2
-        gain = nn.init.calculate_gain('relu')
-        nn.init.orthogonal_(m.weight.data[:, :, mid, mid], gain)
 
 
 def tie_weights(src, trg):

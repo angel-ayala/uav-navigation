@@ -8,24 +8,12 @@ Based on:
 "Improving Sample Efficiency in Model-Free Reinforcement Learning from Images"
 https://arxiv.org/abs/1910.01741
 """
-# import torch
-# from torchvision.transforms import AutoAugment
-# from torchvision.transforms import AugMix
 from thop import clever_format
 from .agent import ACFunction
 from .agent import SACAgent
 from .agent import profile_actor_critic
-# from ..logger import summary_scalar
 from ..srl.agent import SRLAgent
 from ..srl.agent import SRLFunction
-# from ..srl.net import weight_init
-# from ..srl.priors import PriorModel
-# from ..srl.priors import NorthBelief
-# from ..srl.priors import PositionBelief
-# from ..srl.priors import OrientationBelief
-# from ..srl.autoencoder import AEModel
-# from ..srl.autoencoder import RGBModel
-# from ..srl.autoencoder import ATCModel
 from ..srl.autoencoder import profile_ae_model
 
 

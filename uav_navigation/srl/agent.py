@@ -16,12 +16,12 @@ from uav_navigation.agent import profile_q_approximator
 from uav_navigation.logger import summary_scalar
 from .autoencoder import profile_ae_model
 from .autoencoder import instance_autoencoder
-from .net import weight_init
 from .priors import PriorModel
 from .priors import NorthBelief
 from .priors import PositionBelief
 from .priors import OrientationBelief
 from .priors import DistanceBelief
+from ..net import weight_init
 
 
 
