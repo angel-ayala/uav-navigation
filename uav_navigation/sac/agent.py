@@ -94,17 +94,25 @@ class ACFunction(GenericFunction):
         self.target_entropy = -np.prod(action_shape)
 
         # optimizers
-        self.actor_optimizer = torch.optim.Adam(
-            self.actor.parameters(), lr=actor_lr, betas=(actor_beta, 0.999)
-        )
+        # self.actor_optimizer = torch.optim.Adam(
+        #     self.actor.parameters(), lr=actor_lr, betas=(actor_beta, 0.999)
+        # )
 
-        self.critic_optimizer = torch.optim.Adam(
-            self.critic.parameters(), lr=critic_lr, betas=(critic_beta, 0.999)
-        )
+        # self.critic_optimizer = torch.optim.Adam(
+        #     self.critic.parameters(), lr=critic_lr, betas=(critic_beta, 0.999)
+        # )
 
-        self.log_alpha_optimizer = torch.optim.Adam(
-            [self.log_alpha], lr=alpha_lr, betas=(alpha_beta, 0.999)
-        )
+        # self.log_alpha_optimizer = torch.optim.Adam(
+        #     [self.log_alpha], lr=alpha_lr, betas=(alpha_beta, 0.999)
+        # )
+        self.actor_optimizer = torch.optim.AdamW(
+            self.actor.parameters(), lr=actor_lr, amsgrad=True)
+
+        self.critic_optimizer = torch.optim.AdamW(
+            self.critic.parameters(), lr=critic_lr, amsgrad=True)
+
+        self.log_alpha_optimizer = torch.optim.AdamW(
+            [self.log_alpha], lr=alpha_lr, amsgrad=True)
 
     @property
     def alpha(self):
@@ -257,10 +265,10 @@ class SACAgent(GenericAgent):
         if step % self.approximator.actor_update_freq == 0:
             self.approximator.update_actor_and_alpha(obs, weight=loss_weights)
 
-        td_errors = td_errors.squeeze().cpu().numpy()
-        td_errors = np.abs(td_errors) + 1e-6
-        summary_scalar('Loss/TDError', td_errors.mean())
         if self.is_prioritized:
+            td_errors = td_errors.squeeze().cpu().numpy()
+            td_errors = np.abs(td_errors) + 1e-6
+            summary_scalar('Loss/TDError', td_errors.mean())
             # https://link.springer.com/article/10.1007/s11370-024-00514-9
             self.memory.update_priorities(sampled_data[1]['indexes'],
                                           td_errors)

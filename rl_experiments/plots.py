@@ -69,7 +69,7 @@ def create_area_axis(axis_intervals, is_3d=False):
 def get_flight_area(env_params):
     import webots_drone
     package_path = webots_drone.__path__[0]
-    world_path = Path(package_path + '/../worlds/forest_tower.wbt')
+    world_path = Path(package_path + '/../worlds/forest_tower_200x200_simple.wbt')
 
     with open(world_path, 'r') as world_dump:
         world_file = world_dump.read()
@@ -225,10 +225,10 @@ def plot_reward_curve(exp_rewards, exp_rewards_srl, plot_title,
 
 
 def plot_ep_trajectory(episode, exp_data, env_params, plot_title,
-                       limit_area=True, fig_path=None):
+                       limit_area=True, fig_path=None, phase='eval'):
     # Filter data
     try:
-        trj_data = exp_data.get_ep_trajectories(episode - 1)[0]
+        trj_data = exp_data.get_ep_trajectories(episode - 1, phase=phase)[0]
         trj_length = trj_data[0]
         rewards, orientations, states = trj_data[4:7]
         # Plot area and scene elements
@@ -270,7 +270,7 @@ def plot_ep_trajectory(episode, exp_data, env_params, plot_title,
 # exp_path_srl = base_path / 'logs_drone_pixels/ddqn-srl_2024-01-31_15-17-25/'
 
 # Second results
-base_path = Path('rl_experiments/results/')
+base_path = Path('rl_experiments/logs_results/')
 # vector-based DDQN
 exp_path = base_path / 'logs_drone_vector/ddqn_2024-02-09_16-58-55'
 # vector-based DDQN-srl
@@ -281,11 +281,11 @@ exp_path_srl = base_path / 'logs_drone_vector/ddqn-srl_2024-02-09_16-54-53'
 # exp_path_srl = base_path / 'logs_drone_pixels/ddqn-srl_2024-02-09_17-03-01'
 
 # Third results
-base_path = Path('rl_experiments/results2/')
+base_path = Path('rl_experiments/logs_results2/')
 # vector-based DDQN
-# exp_path = base_path / 'logs_drone_vector/ddqn_2024-02-09_16-58-55'
+exp_path = base_path / 'vector/ddqn_2024-02-21_13-44-07'
 # vector-based DDQN-srl
-# exp_path_srl = base_path / 'logs_drone_vector/ddqn-srl_2024-02-09_16-54-53'
+exp_path_srl = base_path / 'vector/ddqn-srl_2024-02-21_13-47-03'
 # pixel-based DDQN
 exp_path = base_path / 'pixels/ddqn_2024-02-21_13-36-28'
 # pixel-based DDQN-SRL
