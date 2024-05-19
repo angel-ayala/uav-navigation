@@ -18,20 +18,13 @@ from webots_drone.data import read_args
 import re
 
 
-def create_area_axis(axis_intervals, is_3d=False):
-    # Create a new figure and axis
-    fig = plt.figure(figsize=(8, 6))
-    if is_3d:
-        ax = fig.add_subplot(111, projection='3d')
-    else:
-        ax = fig.add_subplot(111)
-
+def draw_flight_area(ax, flight_area, is_3d=False):
     # Define the vertices of the cube
     vertices = [
-        [axis_intervals[0][0], axis_intervals[0][1]],
-        [axis_intervals[1][0], axis_intervals[0][1]],
-        [axis_intervals[1][0], axis_intervals[1][1]],
-        [axis_intervals[0][0], axis_intervals[1][1]]
+        [flight_area[0][0], flight_area[0][1]],
+        [flight_area[1][0], flight_area[0][1]],
+        [flight_area[1][0], flight_area[1][1]],
+        [flight_area[0][0], flight_area[1][1]]
     ]
 
     # Define the edges of the cube
@@ -224,8 +217,8 @@ def plot_reward_curve(exp_rewards, exp_rewards_srl, plot_title,
     plt.show()
 
 
-def plot_ep_trajectory(episode, exp_data, env_params, plot_title,
-                       limit_area=True, fig_path=None, phase='eval'):
+def plot_ep_trajectory(episode, exp_data, env_params, fig, plot_title,
+                       limit_area=True, phase='eval', is_3d=False):
     # Filter data
     try:
         trj_data = exp_data.get_ep_trajectories(episode - 1, phase=phase)[0]
@@ -233,7 +226,11 @@ def plot_ep_trajectory(episode, exp_data, env_params, plot_title,
         rewards, orientations, states = trj_data[4:7]
         # Plot area and scene elements
         flight_area = get_flight_area(env_params)
-        area_axis = create_area_axis(flight_area)
+        if is_3d:
+            area_axis = fig.add_subplot(111, projection='3d')
+        else:
+            area_axis = fig.add_subplot(111)
+        draw_flight_area(area_axis, flight_area, is_3d=is_3d)
         plot_fire_zone(area_axis, fire_pos=tuple(trj_data[2][:2]),
                        fire_dim=env_params['fire_dim'], env_params=env_params)
         plot_scene_elements(area_axis)
@@ -244,52 +241,27 @@ def plot_ep_trajectory(episode, exp_data, env_params, plot_title,
         area_axis.plot(states[:, 0], states[:, 1])
         # Plot rewards
         plot_trj_reward(states[:, :2], orientations, rewards)
-        plt.xlabel('Position X (meters)')
-        plt.ylabel('Position Y (meters)')
+        area_axis.set_xlabel('Position X (meters)')
+        area_axis.set_ylabel('Position Y (meters)')
         plot_title += f"\n{trj_length} steps, {rewards.sum():.2f} total reward"
-        plt.title(plot_title)
-        plt.grid()
-        plt.tight_layout()
-        if fig_path:
-            plt.savefig(fig_path)
-        plt.show()
+        area_axis.set_title(plot_title)
+        area_axis.grid()
+        return area_axis
     except IndexError:
         print(f"Error: Episode {episode} trajectory data was not found")
 
 
 # %% Data source
 # First results
-# base_path = Path('rl_experiments/results/')
+base_path = Path('/home/angel/desarrollo/uav_navigation/rl_experiments/')
 # vector-based DDQN
-# exp_path = base_path / 'logs_drone_vector/ddqn_2024-01-31_15-22-09'
+exp_path = base_path / 'logs_vector/ddqn_2024-05-02_23-35-56'
 # vector-based DDQN-srl
-# exp_path_srl = base_path / 'logs_drone_vector/ddqn-srl_2024-02-01_13-01-33'
+exp_path_srl = base_path / 'logs_vector/ddqn-srl_2024-05-08_01-16-16'
 # pixel-based DDQN
 # exp_path = base_path / 'logs_drone_pixels/ddqn_2024-01-31_15-20-06'
 # pixel-based DDQN-SRL
 # exp_path_srl = base_path / 'logs_drone_pixels/ddqn-srl_2024-01-31_15-17-25/'
-
-# Second results
-base_path = Path('rl_experiments/logs_results/')
-# vector-based DDQN
-exp_path = base_path / 'logs_drone_vector/ddqn_2024-02-09_16-58-55'
-# vector-based DDQN-srl
-exp_path_srl = base_path / 'logs_drone_vector/ddqn-srl_2024-02-09_16-54-53'
-# pixel-based DDQN
-# exp_path = base_path / 'logs_drone_pixels/ddqn_2024-02-09_17-00-05'
-# pixel-based DDQN-SRL
-# exp_path_srl = base_path / 'logs_drone_pixels/ddqn-srl_2024-02-09_17-03-01'
-
-# Third results
-base_path = Path('rl_experiments/logs_results2/')
-# vector-based DDQN
-exp_path = base_path / 'vector/ddqn_2024-02-21_13-44-07'
-# vector-based DDQN-srl
-exp_path_srl = base_path / 'vector/ddqn-srl_2024-02-21_13-47-03'
-# pixel-based DDQN
-exp_path = base_path / 'pixels/ddqn_2024-02-21_13-36-28'
-# pixel-based DDQN-SRL
-exp_path_srl = base_path / 'pixels/ddqn-srl_2024-02-21_13-41-35'
 
 # %% Read data
 exp_data, env_params, train_params = read_exp_data(exp_path)
@@ -297,7 +269,7 @@ exp_data_srl, env_params_srl, train_params_srl = read_exp_data(exp_path_srl)
 out_path = None
 
 # %% Ensure save data
-out_path = create_output_path(exp_path.parent, 'assets')
+# out_path = create_output_path(exp_path.parent, 'assets')
 
 
 # %% Plot curves
@@ -323,18 +295,24 @@ def make_reward_curve(phase, smooth_val):
                       smooth_weight=smooth_val, fig_path=fig_path)
 
 
-make_reward_curve('eval', smooth_val=0.99)
+# make_reward_curve('eval', smooth_val=0.99)
 make_reward_curve('learn', smooth_val=0.99)
 
 # %% Plot trajectories
-ddqn_path = create_output_path(out_path, 'ddqn') if out_path else None
-ddqn_srl_path = create_output_path(out_path, 'ddqn_srl') if out_path else None
-for ep in range(1, 101):
+trj_path = create_output_path(out_path, 'trajectories') if out_path else None
+
+for ep in range(101, 301):
+    # Create a new figure and axis
+    fig = plt.figure(layout='constrained', figsize=(15, 6))
+    subfigs = fig.subfigures(1, 2, wspace=0.07)
+    fig_path = trj_path / f"trj_ep_{ep:03d}.png" if out_path else None
     plot_title = f"DDQN trajectory EP {ep:03d}"
-    fig_path = ddqn_path / f"DDQN_trajectory_ep_{ep:03d}.png" if ddqn_path else None
-    plot_ep_trajectory(ep, exp_data, env_params, limit_area=True,
-                       plot_title=plot_title, fig_path=fig_path)
+    plot_ep_trajectory(ep, exp_data, env_params, fig=subfigs[0],
+                       plot_title=plot_title, limit_area=True, phase='learn')
     plot_title = f"DDQN-SRL trajectory EP {ep:03d}"
-    fig_path = ddqn_srl_path / f"DDQN-SRL_trajectory_ep_{ep:03d}.png" if ddqn_srl_path else None
-    plot_ep_trajectory(ep, exp_data_srl, env_params, limit_area=True,
-                       plot_title=plot_title, fig_path=fig_path)
+    plot_ep_trajectory(ep, exp_data_srl, env_params, fig=subfigs[1],
+                       plot_title=plot_title, limit_area=True, phase='learn')
+
+    if fig_path:
+        plt.savefig(fig_path)
+    plt.show()
