@@ -36,29 +36,24 @@ class QNetwork(nn.Module):
         state_size = input_shape[-1]
         action_size = output_shape[0]
         if len(input_shape) == 2:
-            self.conv1 = nn.Conv1d(input_shape[0], hidden_dim,
-                                   kernel_size=state_size)
-        else:
-            self.fc1 = nn.Linear(state_size, hidden_dim)
-        self.drop1 = nn.Dropout(p=0.5)
-        self.fc2 = nn.Linear(hidden_dim, hidden_dim // 2)
-        self.drop2 = nn.Dropout(p=0.25)
-        self.out = nn.Linear(hidden_dim // 2, action_size)
+            self.conv1 = nn.Conv1d(input_shape[0], 1, kernel_size=1)
+        self.fc1 = nn.Linear(state_size, hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
+        self.out = nn.Linear(hidden_dim, action_size)
+        self.drop = nn.Dropout(p=0.5)
 
         self.apply(weight_init)
 
-
-    def forward(self, x):
+    def forward(self, obs):
+        z = obs
         if hasattr(self, 'conv1'):
-            x = self.conv1(x)
-            x = x.squeeze(2)
-        else:
-            x = self.fc1(x)
-        x = self.drop1(x)
-        x = torch.relu(self.fc2(x))
-        x = self.drop2(x)
-        x = self.out(x)
-        return x
+            z = torch.relu(self.conv1(z))
+            z = z.squeeze(1)
+        z = torch.relu(self.fc1(z))
+        z = torch.relu(self.fc2(z))
+        z = self.drop(z)
+        q = self.out(z)
+        return q
 
 
 class QFeaturesNetwork(nn.Module):

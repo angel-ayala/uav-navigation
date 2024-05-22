@@ -88,12 +88,26 @@ class AEModel:
         if type(decoders_lr) is not list:
             decoders_lr = [decoders_lr]
         self.encoder_optim = [optim.Adam(self.encoder[i].parameters(),
-                                        lr=encoder_lr,
-                                        weight_decay=decoder_weight_decay)
+                                         lr=encoder_lr,
+                                         weight_decay=decoder_weight_decay)
                               for i, encoder_lr in enumerate(encoders_lr)]
         self.decoder_optim = [optim.Adam(self.decoder[i].parameters(),
                                          lr=decoder_lr,
                                          weight_decay=decoder_weight_decay)
+                              for i, decoder_lr in enumerate(decoders_lr)]
+
+    def adamw_optimizer(self, encoders_lr, decoders_lr, decoder_weight_decay):
+        if type(encoders_lr) is not list:
+            encoders_lr = [encoders_lr]
+        if type(decoders_lr) is not list:
+            decoders_lr = [decoders_lr]
+        self.encoder_optim = [optim.AdamW(self.encoder[i].parameters(),
+                                          lr=encoder_lr,
+                                          weight_decay=decoder_weight_decay)
+                              for i, encoder_lr in enumerate(encoders_lr)]
+        self.decoder_optim = [optim.AdamW(self.decoder[i].parameters(),
+                                          lr=decoder_lr,
+                                          weight_decay=decoder_weight_decay)
                               for i, decoder_lr in enumerate(decoders_lr)]
 
     def sgd_optimizer(self, encoders_lr, decoders_lr, decoder_weight_decay):
@@ -252,6 +266,17 @@ class AEModel:
             log_image_batch(rec_obs, "Agent/reconstruction")
         self.n_calls += 1
         return rloss
+
+    def __repr__(self):
+        out_str = "Encoders:\n"
+        for e in self.encoder:
+            out_str += str(e)
+            out_str += '\n'
+        out_str += "Decoders:\n"
+        for d in self.decoder:
+            out_str += str(d)
+            out_str += '\n'
+        return out_str
 
 
 class RGBModel(AEModel):
