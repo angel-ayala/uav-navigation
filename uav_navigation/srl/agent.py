@@ -62,7 +62,7 @@ class SRLFunction:
                            decoder_weight_decay):
         ae_model.to(self.device)
         ae_model.apply(weight_init)
-        ae_model.adam_optimizer(encoder_lr, decoder_lr, decoder_weight_decay)
+        ae_model.adamw_optimizer(encoder_lr, decoder_lr, decoder_weight_decay)
         self.models.append(ae_model)
 
     def append_autoencoders(self, models, encoder_only=False):

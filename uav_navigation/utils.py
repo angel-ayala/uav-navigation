@@ -64,7 +64,7 @@ def do_step(agent, env, state, callback=None, must_remember=True):
     # Take the chosen action
     next_state, reward, done, trunc, info = env.step(action)
     if callback:
-        callback((state, action, reward, next_state, done, done), info)
+        callback((state, action, reward, next_state, done, trunc), info)
 
     # Update the agent based on the observed transition
     if must_remember:

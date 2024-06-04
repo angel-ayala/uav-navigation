@@ -64,6 +64,8 @@ def parse_environment_args(parser):
                          help='Cuadrant number for target position.')
     arg_env.add_argument("--target-dim", type=list_of_float, default=[7., 3.5],
                          help="Target's dimension size.")
+    arg_env.add_argument("--zone-steps", type=int, default=10,
+                         help='Max number on target area to end the episode with found target.')
     arg_env.add_argument("--is-pixels", action='store_true',
                          help='Whether if reconstruct an image-based observation.')
     arg_env.add_argument("--is-vector", action='store_true',
@@ -135,7 +137,7 @@ def parse_srl_args(parser):
                          help='Whether if method is SRL-based or not.')
     arg_srl.add_argument("--latent-dim", type=int, default=50,
                          help='Number of features in the latent representation Z.')
-    arg_srl.add_argument("--hidden-dim", type=int, default=256,
+    arg_srl.add_argument("--hidden-dim", type=int, default=512,
                          help='Number of units in the hidden layers.')
     arg_srl.add_argument("--num-filters", type=int, default=32,
                          help='Number of filters in the CNN hidden layers.')
@@ -206,12 +208,12 @@ def parse_args():
     # Argument parser
     parser = argparse.ArgumentParser()
 
-    arg_env = parse_environment_args(parser)
-    arg_agent = parse_agent_args(parser)
-    arg_mem = parse_memory_args(parser)
-    arg_srl = parse_srl_args(parser)
-    arg_training = parse_training_args(parser)
-    arg_utils = parse_utils_args(parser)
+    parse_environment_args(parser)
+    parse_agent_args(parser)
+    parse_memory_args(parser)
+    parse_srl_args(parser)
+    parse_training_args(parser)
+    parse_utils_args(parser)
 
     return parser.parse_args()
 
@@ -251,7 +253,8 @@ def instance_env(args, name='webots_drone:webots_drone/DroneEnvDiscrete-v0',
             altitude_limits=args.altitude_limits,
             fire_pos=args.target_pos,
             fire_dim=args.target_dim,
-            is_pixels=args.is_pixels)
+            is_pixels=args.is_pixels,
+            zone_steps=args.zone_steps)
 
     # Create the environment
     env = gym.make(name, **env_params)

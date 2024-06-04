@@ -290,15 +290,11 @@ class RGBModel(AEModel):
         self.encoder.append(rgb_encoder)
         if not model_params['encoder_only']:
             self.decoder.append(rgb_decoder)
-        # self.avg_encoder = optim.swa_utils.AveragedModel(self.encoder[0])
+        self.avg_encoder = optim.swa_utils.AveragedModel(self.encoder[0])
 
     def encoder_optim_step(self):
         super().encoder_optim_step()
-        # self.avg_encoder.update_parameters(self.encoder[0])
-
-    def compute_loss(self, obs, obs_augm, decoder_latent_lambda):
-        return self.compute_reconstruction_loss(obs, obs_augm, decoder_latent_lambda,
-                                                pixel_obs_log=self.n_calls % self.LOG_FREQ == 0)
+        self.avg_encoder.update_parameters(self.encoder[0])
 
 
 class VectorModel(AEModel):
@@ -312,15 +308,11 @@ class VectorModel(AEModel):
         self.encoder.append(vector_encoder)
         if not model_params['encoder_only']:
             self.decoder.append(vector_decoder)
-        # self.avg_encoder = optim.swa_utils.AveragedModel(self.encoder[0])
+        self.avg_encoder = optim.swa_utils.AveragedModel(self.encoder[0])
 
     def encoder_optim_step(self):
         super().encoder_optim_step()
-        # self.avg_encoder.update_parameters(self.encoder[0])
-
-    def compute_loss(self, obs, obs_augm, decoder_latent_lambda):
-        # TODO: process each variable grouply or elementwise?
-        return self.compute_reconstruction_loss(obs, obs_augm, decoder_latent_lambda)
+        self.avg_encoder.update_parameters(self.encoder[0])
 
 
 class VectorATCModel(AEModel):
