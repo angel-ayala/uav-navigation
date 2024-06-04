@@ -64,7 +64,7 @@ def parse_environment_args(parser):
                          help='Cuadrant number for target position.')
     arg_env.add_argument("--target-dim", type=list_of_float, default=[7., 3.5],
                          help="Target's dimension size.")
-    arg_env.add_argument("--zone-steps", type=int, default=10,
+    arg_env.add_argument("--zone-steps", type=int, default=0,
                          help='Max number on target area to end the episode with found target.')
     arg_env.add_argument("--is-pixels", action='store_true',
                          help='Whether if reconstruct an image-based observation.')
