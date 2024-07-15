@@ -6,6 +6,7 @@ Created on Sun Nov 26 15:49:43 2023
 @author: Angel Ayala
 """
 import numpy as np
+import copy
 import torch
 from torchvision.transforms import AutoAugment
 import torch.nn as nn
@@ -175,9 +176,9 @@ class QFunction(GenericFunction):
     def save(self, path):
         q_app_path = str(path) + "_q_function.pth"
         torch.save({
-            'q_network_state_dict': self.q_network.state_dict(),
-            'target_q_network_state_dict': self.target_q_network.state_dict(),
-            'optimizer_state_dict': self.optimizer.state_dict(),
+            'q_network_state_dict': copy.deepcopy(self.q_network.state_dict()),
+            'target_q_network_state_dict': copy.deepcopy(self.target_q_network.state_dict()),
+            'optimizer_state_dict': copy.deepcopy(self.optimizer.state_dict()),
         }, q_app_path)
 
     def load(self, path, eval_only=True):

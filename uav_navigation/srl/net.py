@@ -80,7 +80,7 @@ class MLP(nn.Module):
     def __init__(self, n_input, n_output, hidden_dim, num_layers=2):
         super(MLP, self).__init__()
         self.h_layers = nn.ModuleList([nn.Linear(n_input, hidden_dim)])
-        for i in range(num_layers - 2):
+        for i in range(num_layers - 1):
             self.h_layers.append(nn.Linear(hidden_dim, hidden_dim))
         self.h_layers.append(nn.Linear(hidden_dim, n_output))
         self.num_layers = len(self.h_layers)
@@ -104,23 +104,23 @@ class VectorEncoder(MLP):
             self.h_layers[0] = nn.Conv1d(state_shape[0], hidden_dim,
                                          kernel_size=state_shape[-1])
         self.feature_dim = latent_dim
+        self.fc = nn.Linear(latent_dim, latent_dim)
         self.ln = nn.LayerNorm(self.feature_dim)
 
-    def forward_z(self, obs, detach=False):
+    def forward_z(self, obs):
         z = obs
         for hidden_layer in self.h_layers:
             z = torch.relu(hidden_layer(z))
             if isinstance(hidden_layer, nn.Conv1d):
                 z = z.squeeze(2)
-        if detach:
-            z.detach()
         return z
 
     def forward(self, obs, detach=False):
-        z = self.forward_z(obs, detach)
-        out = torch.tanh(self.ln(z))
+        z = self.forward_z(obs)
         if detach:
-            out.detach()
+            z.detach()
+        out = self.fc(z)
+        out = torch.tanh(self.ln(out))
         return out
 
 
@@ -144,8 +144,8 @@ class VectorDecoder(MLP):
             self.h_layers[-1] = nn.ConvTranspose1d(hidden_dim, state_shape[0],
                                                    kernel_size=state_shape[-1])
 
-    def forward(self, obs, detach=False):
-        h = obs
+    def forward(self, z):
+        h = z
         for hidden_layer in self.h_layers[:-1]:
             h = torch.relu(hidden_layer(h))
         last_layer = self.h_layers[-1]

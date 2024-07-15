@@ -6,6 +6,7 @@ Created on Fri Jan 26 15:28:24 2024
 @author: Angel Ayala
 """
 
+import copy
 import torch
 from torch.nn import functional as F
 from torch import optim
@@ -55,19 +56,48 @@ def profile_ae_model(ae_model, state_shape, device):
 
 
 def instance_autoencoder(ae_type, ae_params):
-    if ae_type =='RGB':
+    if ae_type == 'RGB':
         ae_model = RGBModel(ae_params)
-    if ae_type =='Vector':
+    if ae_type == 'Vector':
         ae_model = VectorModel(ae_params)
     if ae_type == 'VectorATC':
         ae_model = VectorATCModel(ae_params)
-    if ae_type =='ATC':
+    if ae_type == 'ATC':
         ae_model = ATCModel(ae_params)
-    if ae_type =='ATC-RGB':
+    if ae_type == 'ATC-RGB':
         ae_model = ATCRGBModel(ae_params)
     if ae_params['encoder_only']:
-        ae_params['decoder_lr'] = list()        
+        ae_params['decoder_lr'] = list()
     return ae_model, ae_params
+
+
+def obs_reconstruction_loss(true_obs, rec_obs):
+    if len(true_obs.shape) == 3:
+        # de-stack
+        obs_shape = true_obs.shape
+        n_stack = obs_shape[1] // 1
+        r_shape = (obs_shape[0] * n_stack, ) + obs_shape[-1:]
+        true_obs = true_obs.reshape(r_shape)
+        output_obs = rec_obs.reshape(r_shape)
+
+    if len(true_obs.shape) == 4:
+        # preprocess images to be in [-0.5, 0.5] range
+        true_obs = preprocess_obs(true_obs)
+        # de-stack
+        obs_shape = true_obs.shape
+        n_stack = obs_shape[1] // 3
+        r_shape = (obs_shape[0] * n_stack, 3) + obs_shape[-2:]
+        true_obs = true_obs.reshape(r_shape)
+        output_obs = rec_obs.reshape(r_shape)
+
+    return F.mse_loss(output_obs, true_obs)
+
+
+def latent_l2(latent_value):
+    # add L2 penalty on latent representation
+    # see https://arxiv.org/pdf/1903.12436.pdf
+    latent_value = (0.5 * latent_value.pow(2).sum(1)).mean()
+    return latent_value
 
 
 class AEModel:
@@ -175,20 +205,14 @@ class AEModel:
             d.step()
 
     def encode_obs(self, observation, encoder_idx=0, detach=False):
-        z = self.encoder[encoder_idx](observation)
-        if detach:
-            z = z.detach()
-        return z
+        return self.encoder[encoder_idx](observation, detach=detach)
 
-    def decode_latent(self, z, decoder_idx=0, detach=False):
-        z = self.decoder[decoder_idx](z)
-        if detach:
-            z = z.detach()
-        return z
+    def decode_latent(self, z, decoder_idx=0):
+        return self.decoder[decoder_idx](z)
 
     def reconstruct_obs(self, observation, ae_idx=0, detach=False):
         h = self.encode_obs(observation, encoder_idx=ae_idx, detach=detach)
-        rec_obs = self.decode_latent(h, decoder_idx=ae_idx, detach=detach)
+        rec_obs = self.decode_latent(h, decoder_idx=ae_idx)
         return rec_obs, h
 
     def compute_state_priors(self, obs_t, actions, rewards, obs_t1):
@@ -227,35 +251,15 @@ class AEModel:
         # state_priors_loss = slowness_loss + variability_loss + proportionality_loss + repeatability_loss
         state_priors_loss = slowness_loss + causality_loss + proportionality_loss + repeatability_loss
         summary_scalar(f'Loss/{self.type}/S+V+P+R', state_priors_loss.item())
-        return state_priors_loss        
+        return state_priors_loss
 
     def compute_reconstruction_loss(self, obs, obs_augm, decoder_latent_lambda, pixel_obs_log=False):
         rec_obs, h = self.reconstruct_obs(obs_augm)
-        
-        if len(obs.shape) == 3:
-            # de-stack
-            obs_shape = obs.shape
-            n_stack = obs_shape[1] // 1
-            r_shape = (obs_shape[0] * n_stack, ) + obs_shape[-1:]
-            true_obs = obs.reshape(r_shape)
-            output_obs = rec_obs.reshape(r_shape)
-
-        if len(obs.shape) == 4:
-            # preprocess images to be in [-0.5, 0.5] range
-            true_obs = preprocess_obs(obs)
-            # de-stack
-            obs_shape = obs.shape
-            n_stack = obs_shape[1] // 3
-            r_shape = (obs_shape[0] * n_stack, 3) + obs_shape[-2:]
-            true_obs = true_obs.reshape(r_shape)
-            output_obs = rec_obs.reshape(r_shape)
-
-        rec_loss = F.mse_loss(true_obs, output_obs) #* 10
+        rec_loss = obs_reconstruction_loss(obs, rec_obs)
         summary_scalar(f'Loss/Reconstruction/{self.type}/MSE', rec_loss.item())
 
         # add L2 penalty on latent representation
-        # see https://arxiv.org/pdf/1903.12436.pdf
-        latent_loss = (0.5 * h.pow(2).sum(1)).mean()
+        latent_loss = latent_l2(h)
         summary_scalar(f'Loss/Encoder/{self.type}/L2', latent_loss.item())
 
         rloss = rec_loss + decoder_latent_lambda * latent_loss
@@ -266,6 +270,36 @@ class AEModel:
             log_image_batch(rec_obs, "Agent/reconstruction")
         self.n_calls += 1
         return rloss
+
+    def save_weights(self, weights_path, encoder_only=False):
+        state_dict = dict()
+        for i, (e, eopt) in enumerate(zip(self.encoder, self.encoder_optim)):
+            state_dict.update(
+                {f"encoder_state_dict_{i}": copy.deepcopy(e.state_dict()),
+                 f"encoder_optimizer_state_dict_{i}":
+                     copy.deepcopy(eopt.state_dict())})
+
+        if not encoder_only:
+            for i, (d, dopt) in enumerate(zip(self.decoder, self.decoder_optim)):
+                state_dict.update(
+                    {f"decoder_state_dict_{i}": copy.deepcopy(d.state_dict()),
+                     f"decoder_optimizer_state_dict_{i}":
+                         copy.deepcopy(dopt.state_dict())})
+
+        torch.save(state_dict, weights_path)
+
+    def load_weights(self, weights_path, device, encoder_only=False):
+        checkpoint = torch.load(weights_path, map_location=device)
+
+        for i, (e, eopt) in enumerate(zip(self.encoder, self.encoder_optim)):
+            e.load_state_dict(checkpoint[f"encoder_state_dict_{i}"])
+            eopt.load_state_dict(checkpoint[f"encoder_optimizer_state_dict_{i}"])
+
+        if not encoder_only:
+            for i, (d, dopt) in enumerate(zip(self.decoder, self.decoder_optim)):
+                d.load_state_dict(checkpoint[f"decoder_state_dict_{i}"])
+                dopt.load_state_dict(checkpoint[f"decoder_optimizer_state_dict_{i}"])
+
 
     def __repr__(self):
         out_str = "Encoders:\n"
@@ -308,11 +342,6 @@ class VectorModel(AEModel):
         self.encoder.append(vector_encoder)
         if not model_params['encoder_only']:
             self.decoder.append(vector_decoder)
-        self.avg_encoder = optim.swa_utils.AveragedModel(self.encoder[0])
-
-    def encoder_optim_step(self):
-        super().encoder_optim_step()
-        self.avg_encoder.update_parameters(self.encoder[0])
 
 
 class VectorATCModel(AEModel):
@@ -321,12 +350,12 @@ class VectorATCModel(AEModel):
         vector_encoder = VectorMDPEncoder(model_params['vector_shape'],
                                           model_params['latent_dim'],
                                           model_params['hidden_dim'],
-                                          num_layers=model_params['num_layers'])        
+                                          num_layers=model_params['num_layers'])
         self.encoder.append(vector_encoder)
         self.momentum_encoder = VectorMDPEncoder(model_params['vector_shape'],
                                                  model_params['latent_dim'],
                                                  model_params['hidden_dim'],
-                                                 num_layers=model_params['num_layers'])        
+                                                 num_layers=model_params['num_layers'])
         if not model_params['encoder_only']:
             vector_decoder = VectorDecoder(model_params['vector_shape'],
                                            model_params['latent_dim'],
@@ -353,7 +382,7 @@ class VectorATCModel(AEModel):
 
     def compute_loss(self, obs_augm, obs_t1_augm, rewards):
         return self.compute_contrastive_loss(obs_augm, obs_t1_augm, rewards)
-    
+
     def compute_contrastive_loss(self, obs_augm, obs_t1_augm, rewards):
         """Compute Augmented Temporal Contrast loss function.
 

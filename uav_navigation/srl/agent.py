@@ -24,7 +24,6 @@ from .priors import DistanceBelief
 from ..net import weight_init
 
 
-
 def profile_srl_approximator(approximator, state_shape, action_shape):
     total_flops, total_params = 0, 0
     q_feature_dim = 0
@@ -91,9 +90,9 @@ class SRLFunction:
         for m in self.models:
             if latent_types is None or m.type in latent_types:
                 if 'RGB' in m.type:
-                    z = m.encode_obs(obs_2d.to(self.device))
+                    z = m.encode_obs(obs_2d.to(self.device), detach=True)
                 if 'Vector' in m.type:
-                    z = m.encode_obs(obs_1d.to(self.device))
+                    z = m.encode_obs(obs_1d.to(self.device), detach=True)
                 if z.dim() == 1:
                     z = z.unsqueeze(0)
                 z_hat.append(z)
@@ -198,23 +197,8 @@ class SRLFunction:
     def save(self, path, ae_models, encoder_only=False):
         for i, (m, _) in enumerate(ae_models.items()):
             ae_model = self.models[i]
-            encoder, decoder = ae_model.encoder, ae_model.decoder
-            encoder_opt, decoder_opt = ae_model.encoder_optim, ae_model.decoder_optim
-
-            state_dict = dict()
-            for i, (e, eopt) in enumerate(zip(encoder, encoder_opt)):
-                state_dict.update(
-                    {f"encoder_state_dict_{i}": e.state_dict(),
-                     f"encoder_optimizer_state_dict_{i}": eopt.state_dict()})
-
-            if not encoder_only:
-                for i, (d, dopt) in enumerate(zip(decoder, decoder_opt)):
-                    state_dict.update(
-                        {f"decoder_state_dict_{i}": d.state_dict(),
-                         f"decoder_optimizer_state_dict_{i}": dopt.state_dict()})
-
-            q_app_path = str(path) + f"_ae_{m}.pth"
-            torch.save(state_dict, q_app_path)
+            ae_path = str(path) + f"_ae_{m}.pth"
+            self.models[i].save_weights(ae_path, encoder_only)
 
     def load(self, path, ae_models, encoder_only=False, eval_only=False):
         # ensure empty list
@@ -223,35 +207,14 @@ class SRLFunction:
         self.models = list()
 
         for i, (m, m_params) in enumerate(ae_models.items()):
-            m_params['encoder_only'] = encoder_only
-            ae_model, ae_params = instance_autoencoder(m, m_params)
+            ae_params = m_params.copy()
+            ae_params['encoder_only'] = encoder_only
+            ae_path = str(path) + f"_ae_{m}.pth"
+            ae_model, ae_params = instance_autoencoder(m, ae_params)
             self.append_autoencoder(
                 ae_model, ae_params['encoder_lr'], ae_params['decoder_lr'],
                 ae_params['decoder_weight_decay'])
-            encoder, decoder = ae_model.encoder, ae_model.decoder
-            encoder_opt, decoder_opt = ae_model.encoder_optim, ae_model.decoder_optim
-
-            q_app_path = str(path) + f"_ae_{m}.pth"
-            checkpoint = torch.load(q_app_path, map_location=self.device)
-
-            for i, (e, eopt) in enumerate(zip(encoder, encoder_opt)):
-                e.load_state_dict(checkpoint[f"encoder_state_dict_{i}"])
-                if eval_only:
-                    # Ensure the models are in evaluation mode after loading
-                    e.eval()
-                else:
-                    eopt.load_state_dict(
-                        checkpoint[f"encoder_optimizer_state_dict_{i}"])
-
-            if not encoder_only:
-                for i, (d, dopt) in enumerate(zip(decoder, decoder_opt)):
-                    d.load_state_dict(checkpoint[f"decoder_state_dict_{i}"])
-                    if eval_only:
-                        # Ensure the models are in evaluation mode after loading
-                        d.eval()
-                    else:
-                        dopt.load_state_dict(
-                            checkpoint[f"decoder_optimizer_state_dict_{i}"])
+            self.models[i].load_weights(ae_path, self.device, encoder_only)
 
 
 class SRLAgent:
@@ -293,8 +256,7 @@ class SRLAgent:
                                            prior_params['target_obs'],
                                            learning_rate=prior_params['learning_rate'])
     def update_reconstruction(self):
-        # sampled_data = self.memory.random_sample(self.BATCH_SIZE, device=self.approximator.device)
-        sampled_data = self.memory.sample(self.batch_size, device=self.approximator.device)
+        sampled_data = self.memory.random_sample(self.batch_size, device=self.approximator.device)
 
         if self.is_prioritized:
             obs, actions, rewards, obs_t1, dones = sampled_data[0]
@@ -315,12 +277,6 @@ class SRLAgent:
             return False
         if step % self.reconstruct_freq == 0:
             self.update_reconstruction()
-
-    def save(self, path, encoder_only=False):
-        self.approximator.save(path, self.ae_models, encoder_only)
-
-    def load(self, path, eval_only=True, encoder_only=False):
-        self.approximator.load(path, self.ae_models, encoder_only, eval_only)
 
 
 class SRLQFunction(QFunction, SRLFunction):
@@ -346,10 +302,10 @@ class SRLQFunction(QFunction, SRLFunction):
 
     def update(self, td_loss):
         for m in self.models:
-            m.encoder_optim[0].zero_grad()
+            m.encoder_optim_zero_grad()
         QFunction.update(self, td_loss)
         for m in self.models:
-            m.encoder_optim[0].step()
+            m.encoder_optim_step()
 
     def save(self, path, ae_models, encoder_only=False):
         QFunction.save(self, path)
@@ -397,7 +353,7 @@ class SRLDDQNAgent(DDQNAgent, SRLAgent):
         SRLAgent.update(self, step)
 
     def save(self, path, encoder_only=False):
-        SRLAgent.save(self, path, encoder_only)
+        self.approximator.save(path, self.ae_models, encoder_only)
 
-    def load(self, path, eval_only=True, encoder_only=False):
-        SRLAgent.load(self, path, eval_only, encoder_only)
+    def load(self, path, encoder_only=False, eval_only=True):
+        self.approximator.load(path, self.ae_models, encoder_only, eval_only)
