@@ -4,7 +4,7 @@ package_name = 'uav_navigation'
 
 setup(
     name=package_name,
-    version='2.2.0',    
+    version='3.0.0',    
     description='Code repository of reinforcement learning experiments for navigation using the gym-webots-drone environment',
     url='https://github.com/angel-ayala/uav-navigation',
     author='Angel Ayala',
