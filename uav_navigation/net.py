@@ -30,29 +30,44 @@ def weight_init(m):
         nn.init.orthogonal_(m.weight.data[:, :, mid, mid], gain)
 
 
-class QNetwork(nn.Module):
-    def __init__(self, input_shape, output_shape, hidden_dim=512):
-        super(QNetwork, self).__init__()
-        state_size = input_shape[-1]
-        action_size = output_shape[0]
-        if len(input_shape) == 2:
-            self.conv1 = nn.Conv1d(input_shape[0], 1, kernel_size=1)
-        self.fc1 = nn.Linear(state_size, hidden_dim)
-        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
-        self.out = nn.Linear(hidden_dim, action_size)
-        self.drop = nn.Dropout(p=0.5)
+class MLP(nn.Module):
+    """MLP for q-function."""
 
+    def __init__(self, n_input, n_output, hidden_dim, num_layers=2):
+        super(MLP, self).__init__()
+        self.h_layers = nn.ModuleList([nn.Linear(n_input, hidden_dim)])
+        for i in range(num_layers - 1):
+            self.h_layers.append(nn.Linear(hidden_dim, hidden_dim))
+        self.h_layers.append(nn.Linear(hidden_dim, n_output))
+        self.num_layers = len(self.h_layers)
+
+    def forward(self, obs):
+        h = obs
+        for h_layer in self.h_layers:
+            h = torch.relu(h_layer(h))
+
+        return h
+
+
+class QNetwork(MLP):
+    def __init__(self, state_shape, action_shape, hidden_dim, num_layers=2):
+        super(QNetwork, self).__init__(
+            state_shape[-1], action_shape[-1], hidden_dim, num_layers)
+        if len(state_shape) == 2:
+            self.h_layers[0] = nn.Conv1d(state_shape[0], hidden_dim,
+                                         kernel_size=state_shape[-1])
+        self.drop = nn.Dropout(p=0.5)
         self.apply(weight_init)
 
     def forward(self, obs):
         z = obs
-        if hasattr(self, 'conv1'):
-            z = torch.relu(self.conv1(z))
-            z = z.squeeze(1)
-        z = torch.relu(self.fc1(z))
-        z = torch.relu(self.fc2(z))
+        for hidden_layer in self.h_layers[:-1]:
+            z = torch.relu(hidden_layer(z))
+            if isinstance(hidden_layer, nn.Conv1d):
+                z = z.squeeze(2)
+
         z = self.drop(z)
-        q = self.out(z)
+        q = self.h_layers[-1](z)
         return q
 
 

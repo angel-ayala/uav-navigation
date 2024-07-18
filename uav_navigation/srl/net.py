@@ -13,6 +13,8 @@ from torch import nn
 from torch import optim
 from adabelief_pytorch import AdaBelief
 
+from uav_navigation.net import MLP
+
 
 OUT_DIM = {2: 39, 4: 35, 6: 31}
 
@@ -68,32 +70,6 @@ def imu2pose_model(imu_shape, pos_shape, hidden_dim, latent_dim,
     decoder1 = MLP(latent_dim, imu_shape[0], hidden_dim, num_layers=num_layers)
     decoder2 = MLP(latent_dim, pos_shape[0], hidden_dim, num_layers=num_layers)
     return encoder, (decoder1, decoder2)
-
-
-def q_function(latent_dim, action_shape, hidden_dim, num_layers=2):
-    return VectorDecoder(action_shape, latent_dim, hidden_dim, num_layers=num_layers)
-
-
-class MLP(nn.Module):
-    """MLP for q-function."""
-
-    def __init__(self, n_input, n_output, hidden_dim, num_layers=2):
-        super(MLP, self).__init__()
-        self.h_layers = nn.ModuleList([nn.Linear(n_input, hidden_dim)])
-        for i in range(num_layers - 1):
-            self.h_layers.append(nn.Linear(hidden_dim, hidden_dim))
-        self.h_layers.append(nn.Linear(hidden_dim, n_output))
-        self.num_layers = len(self.h_layers)
-
-    def forward(self, obs, detach=False):
-        h = obs
-        for h_layer in self.h_layers:
-            h = torch.relu(h_layer(h))
-
-        if detach:
-            h = h.detach()
-
-        return h
 
 
 class VectorEncoder(MLP):

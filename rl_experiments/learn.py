@@ -17,7 +17,6 @@ from pathlib import Path
 from uav_navigation.agent import DDQNAgent, QFunction
 from uav_navigation.net import QNetwork, QFeaturesNetwork
 from uav_navigation.srl.agent import SRLDDQNAgent, SRLQFunction
-from uav_navigation.srl.net import q_function
 from uav_navigation.memory import ReplayBuffer, PrioritizedReplayBuffer
 from uav_navigation.utils import save_dict_json, run_agent
 
@@ -418,9 +417,9 @@ if __name__ == '__main__':
         agent_class = SRLDDQNAgent
         q_approximator = SRLQFunction
         ae_models = args2ae_model(args, env_params)
-        approximator_params['q_app_fn'] = q_function
+        approximator_params['q_app_fn'] = QNetwork
         approximator_params['q_app_params'] = dict(
-            latent_dim=args.latent_dim * len(ae_models.keys()),
+            state_shape=(args.latent_dim * len(ae_models.keys()), ),
             action_shape=agent_params['action_shape'],
             hidden_dim=args.hidden_dim,
             num_layers=args.num_layers)
@@ -435,9 +434,10 @@ if __name__ == '__main__':
         approximator_params['q_app_fn'] = QFeaturesNetwork\
             if args.is_pixels else QNetwork
         approximator_params['q_app_params'] = dict(
-            input_shape=env_params['state_shape'],
-            output_shape=agent_params['action_shape'],
-            hidden_dim=args.hidden_dim)
+            state_shape=env_params['state_shape'],
+            action_shape=agent_params['action_shape'],
+            hidden_dim=args.hidden_dim,
+            num_layers=args.num_layers)
     agent_params.update(
         dict(approximator=q_approximator(**approximator_params)))
 
