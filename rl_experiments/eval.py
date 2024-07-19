@@ -15,7 +15,6 @@ from uav_navigation.agent import DDQNAgent, QFunction
 from uav_navigation.net import QNetwork, QFeaturesNetwork
 from uav_navigation.agent import profile_q_approximator
 from uav_navigation.srl.agent import SRLDDQNAgent, SRLQFunction
-from uav_navigation.srl.net import q_function
 from uav_navigation.srl.agent import profile_srl_approximator
 from uav_navigation.utils import load_json_dict
 from uav_navigation.utils import evaluate_agent
@@ -102,7 +101,7 @@ def run_evaluation(seed_val, logpath, episode):
         agent_class = SRLDDQNAgent
         q_approximator = SRLQFunction
         function_profiler = profile_srl_approximator
-        approximator_params['q_app_fn'] = q_function
+        approximator_params['q_app_fn'] = QNetwork
     else:
         agent_class = DDQNAgent
         q_approximator = QFunction
