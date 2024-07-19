@@ -215,44 +215,6 @@ class AEModel:
         rec_obs = self.decode_latent(h, decoder_idx=ae_idx)
         return rec_obs, h
 
-    def compute_state_priors(self, obs_t, actions, rewards, obs_t1):
-        actions_argmax = actions.argmax(-1)
-        s_t = self.encode_obs(obs_t)
-        s_t1 = self.encode_obs(obs_t1)
-
-        state_diff = s_t1 - s_t
-        state_diff_norm = torch.norm(state_diff, p=2., dim=-1)
-        similarity = lambda x, y: torch.norm(x - y, p=2., dim=-1)
-
-        slowness_loss = (state_diff_norm ** 2).mean()
-        # variability_loss = torch.exp(-similarity(s_t, s_t1)).mean()
-
-        # equal actions
-        actions_unique, actions_count = torch.unique(actions_argmax, return_counts=True)
-        actions_unique = actions_unique[actions_count > 1]
-        causality_loss = 0.
-        proportionality_loss = 0.
-        repeatability_loss = 0.
-        for a in actions_unique:
-            actions_mask = actions_argmax == a
-            proportionality_loss += (torch.diff(state_diff_norm[actions_mask], dim=0) ** 2.).mean()
-            repeatability_loss += torch.exp(-similarity(s_t1[actions_mask], s_t[actions_mask]) ** 2).mean() *\
-                (torch.norm(torch.diff(state_diff[actions_mask], dim=0), p=2., dim=-1) ** 2.).mean()
-            for i, r_diff in enumerate(torch.diff(rewards[actions_mask], dim=0)):
-                amask1 = actions_mask.nonzero().flatten()[i]
-                amask2 = actions_mask.nonzero().flatten()[i+1]
-                if r_diff != 0:
-                    causality_loss += torch.exp(-similarity(s_t1[amask1], s_t1[amask2]) ** 2).mean()
-        summary_scalar(f'Loss/{self.type}/Slowness', slowness_loss.item())
-        # summary_scalar(f'Loss/{self.type}/Encoder/Variability', variability_loss.item())
-        summary_scalar(f'Loss/{self.type}/Causality', causality_loss.item())
-        summary_scalar(f'Loss/{self.type}/Proportionality', proportionality_loss.item())
-        summary_scalar(f'Loss/{self.type}/Repeatibility', repeatability_loss.item())
-        # state_priors_loss = slowness_loss + variability_loss + proportionality_loss + repeatability_loss
-        state_priors_loss = slowness_loss + causality_loss + proportionality_loss + repeatability_loss
-        summary_scalar(f'Loss/{self.type}/S+V+P+R', state_priors_loss.item())
-        return state_priors_loss
-
     def compute_reconstruction_loss(self, obs, obs_augm, decoder_latent_lambda, pixel_obs_log=False):
         rec_obs, h = self.reconstruct_obs(obs_augm)
         rec_loss = obs_reconstruction_loss(obs, rec_obs)
@@ -270,6 +232,44 @@ class AEModel:
             log_image_batch(rec_obs, "Agent/reconstruction")
         self.n_calls += 1
         return rloss
+
+    # def compute_state_priors(self, obs_t, actions, rewards, obs_t1):
+    #     actions_argmax = actions.argmax(-1)
+    #     s_t = self.encode_obs(obs_t)
+    #     s_t1 = self.encode_obs(obs_t1)
+
+    #     state_diff = s_t1 - s_t
+    #     state_diff_norm = torch.norm(state_diff, p=2., dim=-1)
+    #     similarity = lambda x, y: torch.norm(x - y, p=2., dim=-1)
+
+    #     slowness_loss = (state_diff_norm ** 2).mean()
+    #     # variability_loss = torch.exp(-similarity(s_t, s_t1)).mean()
+
+    #     # equal actions
+    #     actions_unique, actions_count = torch.unique(actions_argmax, return_counts=True)
+    #     actions_unique = actions_unique[actions_count > 1]
+    #     causality_loss = 0.
+    #     proportionality_loss = 0.
+    #     repeatability_loss = 0.
+    #     for a in actions_unique:
+    #         actions_mask = actions_argmax == a
+    #         proportionality_loss += (torch.diff(state_diff_norm[actions_mask], dim=0) ** 2.).mean()
+    #         repeatability_loss += torch.exp(-similarity(s_t1[actions_mask], s_t[actions_mask]) ** 2).mean() *\
+    #             (torch.norm(torch.diff(state_diff[actions_mask], dim=0), p=2., dim=-1) ** 2.).mean()
+    #         for i, r_diff in enumerate(torch.diff(rewards[actions_mask], dim=0)):
+    #             amask1 = actions_mask.nonzero().flatten()[i]
+    #             amask2 = actions_mask.nonzero().flatten()[i+1]
+    #             if r_diff != 0:
+    #                 causality_loss += torch.exp(-similarity(s_t1[amask1], s_t1[amask2]) ** 2).mean()
+    #     summary_scalar(f'Loss/{self.type}/Slowness', slowness_loss.item())
+    #     # summary_scalar(f'Loss/{self.type}/Encoder/Variability', variability_loss.item())
+    #     summary_scalar(f'Loss/{self.type}/Causality', causality_loss.item())
+    #     summary_scalar(f'Loss/{self.type}/Proportionality', proportionality_loss.item())
+    #     summary_scalar(f'Loss/{self.type}/Repeatibility', repeatability_loss.item())
+    #     # state_priors_loss = slowness_loss + variability_loss + proportionality_loss + repeatability_loss
+    #     state_priors_loss = slowness_loss + causality_loss + proportionality_loss + repeatability_loss
+    #     summary_scalar(f'Loss/{self.type}/S+V+P+R', state_priors_loss.item())
+    #     return state_priors_loss
 
     def save_weights(self, weights_path, encoder_only=False):
         state_dict = dict()
@@ -313,6 +313,19 @@ class AEModel:
         return out_str
 
 
+class VectorModel(AEModel):
+    def __init__(self, model_params):
+        super(VectorModel, self).__init__('Vector')
+        vector_encoder, vector_decoder = vector_reconstruction_model(
+            model_params['vector_shape'],
+            model_params['hidden_dim'],
+            model_params['latent_dim'],
+            num_layers=model_params['num_layers'])
+        self.encoder.append(vector_encoder)
+        if not model_params['encoder_only']:
+            self.decoder.append(vector_decoder)
+
+
 class RGBModel(AEModel):
     def __init__(self, model_params):
         super(RGBModel, self).__init__('RGB')
@@ -329,19 +342,6 @@ class RGBModel(AEModel):
     def encoder_optim_step(self):
         super().encoder_optim_step()
         self.avg_encoder.update_parameters(self.encoder[0])
-
-
-class VectorModel(AEModel):
-    def __init__(self, model_params):
-        super(VectorModel, self).__init__('Vector')
-        vector_encoder, vector_decoder = vector_reconstruction_model(
-            model_params['vector_shape'],
-            model_params['hidden_dim'],
-            model_params['latent_dim'],
-            num_layers=model_params['num_layers'])
-        self.encoder.append(vector_encoder)
-        if not model_params['encoder_only']:
-            self.decoder.append(vector_decoder)
 
 
 class VectorATCModel(AEModel):

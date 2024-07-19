@@ -72,6 +72,18 @@ def imu2pose_model(imu_shape, pos_shape, hidden_dim, latent_dim,
     return encoder, (decoder1, decoder2)
 
 
+class QNetworkWrapper(nn.Module):
+    def __init__(self, q_network, encoder_fn):
+        super(QNetworkWrapper, self).__init__()
+        self.q_network = q_network
+        self.encoder = encoder_fn
+
+    def forward(self, obs):
+        z = self.encoder(obs, detach=True)
+        q = self.q_network(z)
+        return q
+
+
 class VectorEncoder(MLP):
     def __init__(self, state_shape, latent_dim, hidden_dim, num_layers=2):
         super(VectorEncoder, self).__init__(
@@ -99,17 +111,11 @@ class VectorEncoder(MLP):
         out = torch.tanh(self.ln(out))
         return out
 
-
-class VectorMDPEncoder(VectorEncoder):
-    def __init__(self, state_shape, latent_dim, hidden_dim, num_layers=2):
-        super(VectorMDPEncoder, self).__init__(
-            state_shape, latent_dim, hidden_dim, num_layers)
-        self.contrastive = nn.Linear(latent_dim, latent_dim)
-
-    def forward_code(self, obs, detach=False):
-        code = self.forward(obs, detach=detach)
-        h_fc = self.contrastive(code) + code
-        return h_fc
+    def copy_weights_from(self, source):
+        """Tie hidden layers"""
+        # only tie hidden layers
+        for i in range(self.num_layers):
+            tie_weights(src=source.h_layers[i], trg=self.h_layers[i])
 
 
 class VectorDecoder(MLP):
@@ -129,6 +135,18 @@ class VectorDecoder(MLP):
             h = h.unsqueeze(2)
         out = last_layer(h)
         return out
+
+
+class VectorMDPEncoder(VectorEncoder):
+    def __init__(self, state_shape, latent_dim, hidden_dim, num_layers=2):
+        super(VectorMDPEncoder, self).__init__(
+            state_shape, latent_dim, hidden_dim, num_layers)
+        self.contrastive = nn.Linear(latent_dim, latent_dim)
+
+    def forward_code(self, obs, detach=False):
+        code = self.forward(obs, detach=detach)
+        h_fc = self.contrastive(code) + code
+        return h_fc
 
 
 class ChannelAttention(nn.Module):
