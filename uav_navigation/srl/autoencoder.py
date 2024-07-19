@@ -337,11 +337,6 @@ class RGBModel(AEModel):
         self.encoder.append(rgb_encoder)
         if not model_params['encoder_only']:
             self.decoder.append(rgb_decoder)
-        self.avg_encoder = optim.swa_utils.AveragedModel(self.encoder[0])
-
-    def encoder_optim_step(self):
-        super().encoder_optim_step()
-        self.avg_encoder.update_parameters(self.encoder[0])
 
 
 class VectorATCModel(AEModel):

@@ -74,11 +74,11 @@ class QNetwork(MLP):
 class QFeaturesNetwork(nn.Module):
     feature_dim = 512
 
-    def __init__(self, input_shape, output_shape, only_cnn=False):
+    def __init__(self, state_shape, action_shape, only_cnn=False):
         super().__init__()
 
-        state_size = input_shape[0]
-        action_size = output_shape[0]
+        state_size = state_shape[0]
+        action_size = action_shape[0]
 
         self._h1 = nn.Conv2d(state_size, 32, kernel_size=8, stride=4)
         self._h2 = nn.Conv2d(32, 64, kernel_size=4, stride=2)

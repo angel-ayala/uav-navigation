@@ -219,7 +219,6 @@ class SRLQFunction(QFunction, SRLFunction):
     def load(self, path, ae_models, encoder_only=False, eval_only=False):
         QFunction.load(self, path, eval_only)
         SRLFunction.load(self, path, ae_models, encoder_only, eval_only)
-        self.fuse_encoder()
 
 
 class SRLAgent:

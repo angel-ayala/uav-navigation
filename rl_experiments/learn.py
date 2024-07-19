@@ -431,13 +431,18 @@ if __name__ == '__main__':
     else:
         agent_class = DDQNAgent
         q_approximator = QFunction
-        approximator_params['q_app_fn'] = QFeaturesNetwork\
-            if args.is_pixels else QNetwork
-        approximator_params['q_app_params'] = dict(
-            state_shape=env_params['state_shape'],
-            action_shape=agent_params['action_shape'],
-            hidden_dim=args.hidden_dim,
-            num_layers=args.num_layers)
+        if args.is_pixels:
+            approximator_params['q_app_fn'] = QFeaturesNetwork
+            approximator_params['q_app_params'] = dict(
+                state_shape=env_params['state_shape'],
+                action_shape=agent_params['action_shape'])
+        else:
+            approximator_params['q_app_fn'] = QNetwork
+            approximator_params['q_app_params'] = dict(
+                state_shape=env_params['state_shape'],
+                action_shape=agent_params['action_shape'],
+                hidden_dim=args.hidden_dim,
+                num_layers=args.num_layers)
     agent_params.update(
         dict(approximator=q_approximator(**approximator_params)))
 

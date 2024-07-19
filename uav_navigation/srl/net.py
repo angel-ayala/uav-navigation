@@ -75,8 +75,8 @@ def imu2pose_model(imu_shape, pos_shape, hidden_dim, latent_dim,
 class QNetworkWrapper(nn.Module):
     def __init__(self, q_network, encoder_fn):
         super(QNetworkWrapper, self).__init__()
-        self.q_network = q_network
         self.encoder = encoder_fn
+        self.q_network = q_network
 
     def forward(self, obs):
         z = self.encoder(obs, detach=True)
@@ -209,7 +209,7 @@ class PixelEncoder(nn.Module):
 
         return h
 
-    def copy_conv_weights_from(self, source):
+    def copy_weights_from(self, source):
         """Tie convolutional layers"""
         # only tie conv layers
         for i in range(self.num_layers):
