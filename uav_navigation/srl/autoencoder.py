@@ -10,9 +10,7 @@ import copy
 import torch
 from torch.nn import functional as F
 from torch import optim
-from thop import clever_format
 from info_nce import InfoNCE
-from uav_navigation.utils import profile_model
 from uav_navigation.utils import soft_update_params
 from uav_navigation.logger import summary_scalar
 
@@ -33,26 +31,6 @@ from .net import adabelief_optimizer
 # from .net import logarithmic_difference_loss
 # from .net import BiGRU
 from ..logger import log_image_batch
-
-
-def profile_ae_model(ae_model, state_shape, device):
-    total_flops, total_params = 0, 0
-    feature_dim = 0
-    for i, encoder in enumerate(ae_model.encoder):
-        flops, params = profile_model(encoder, state_shape, device)
-        total_flops += flops
-        total_params += params
-        print('Encoder {}({}): {} flops, {} params'.format(
-            ae_model.type, i, *clever_format([flops, params], "%.3f")))
-        feature_dim += encoder.feature_dim
-    # profile decode stage
-    for i, decoder in enumerate(ae_model.decoder):
-        flops, params = profile_model(decoder, feature_dim, device)
-        total_flops += flops
-        total_params += params
-        print('Decoder {}({}): {} flops, {} params'.format(
-            ae_model.type, i, *clever_format([flops, params], "%.3f")))
-    return total_flops, total_params
 
 
 def instance_autoencoder(ae_type, ae_params):

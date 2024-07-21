@@ -11,27 +11,11 @@ import torch
 from torchvision.transforms import AutoAugment
 import torch.nn as nn
 import torch.optim as optim
-from thop import clever_format
-from .utils import profile_model
 from .utils import soft_update_params
 from .utils import format_obs
 from .memory import is_prioritized_memory
 from .logger import summary_scalar
 # from .srl.net import adabelief_optimizer
-
-
-def profile_q_approximator(approximator, state_shape, action_shape):
-    # profile q-network
-    q_network = approximator.q_network
-    target_q_network = approximator.target_q_network
-    device = approximator.device
-    flops, params = profile_model(q_network, state_shape, device)
-    print('Q-network: {} flops, {} params'.format(
-        *clever_format([flops, params], "%.3f")))
-    flops, params = profile_model(target_q_network, state_shape, device)
-    print('Target Q-network: {} flops, {} params'.format(
-        *clever_format([flops, params], "%.3f")))
-    return flops, params
 
 
 class GenericFunction:

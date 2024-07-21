@@ -10,44 +10,16 @@ https://arxiv.org/abs/1910.01741
 """
 import torch
 import copy
-from thop import clever_format
 from uav_navigation.agent import QFunction
 from uav_navigation.agent import DDQNAgent
-from uav_navigation.agent import profile_q_approximator
 from uav_navigation.logger import summary_scalar
 from uav_navigation.net import weight_init
-from .autoencoder import profile_ae_model
 from .autoencoder import instance_autoencoder
 from .priors import NorthBelief
 from .priors import PositionBelief
 from .priors import OrientationBelief
 from .priors import DistanceBelief
 from .net import QNetworkWrapper
-
-
-def profile_srl_approximator(approximator, state_shape, action_shape):
-    total_flops, total_params = 0, 0
-    q_feature_dim = 0
-    for m in approximator.models:
-        if approximator.is_multimodal:
-            if any(t in m.type for t in ['RGB', 'ATC']):
-                flops, params = profile_ae_model(m, state_shape[0], approximator.device)
-            if m.type == 'Vector':
-                flops, params = profile_ae_model(m, state_shape[1], approximator.device)
-        else:
-            flops, params = profile_ae_model(m, state_shape, approximator.device)
-        total_flops += flops
-        total_params += params
-        q_feature_dim += m.encoder[0].feature_dim
-
-    # profile q-network
-    flops, params = profile_q_approximator(approximator, q_feature_dim,
-                                           action_shape)
-    total_flops += flops
-    total_params += params
-    print('Total: {} flops, {} params'.format(
-        *clever_format([total_flops, total_params], "%.3f")))
-    return total_flops, total_params
 
 
 class SRLFunction:
