@@ -124,7 +124,7 @@ def run_evaluation(seed_val, logpath, episode):
         for fc in target_pos:
             evaluate_agent(agent, env, args.eval_steps,
                            training_params['eval_epsilon'],
-                           fire_cuadrant=fc,
+                           fire_quadrant=fc,
                            step_callback=store_callback)
 
 

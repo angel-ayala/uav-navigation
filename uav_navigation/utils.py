@@ -154,7 +154,7 @@ def run_agent(agent, env, training_steps, mem_steps, eval_interval,
             if eval_steps > 0:
                 for fc in range(4):
                     e_reward, e_steps, e_time = evaluate_agent(
-                        agent, env, eval_steps, eval_epsilon, fire_cuadrant=fc,
+                        agent, env, eval_steps, eval_epsilon, fire_quadrant=fc,
                         step_callback=step_callback)
                     summary().add_scalar(f"Evaluation/EpRewardC{fc}", e_reward, total_episodes)
                     summary().add_scalar(f"Evaluation/EpNumberStepsC{fc}", e_steps, total_episodes)
@@ -176,9 +176,9 @@ def run_agent(agent, env, training_steps, mem_steps, eval_interval,
     return total_reward, total_episodes
 
 
-def evaluate_agent(agent, env, eval_steps, eval_epsilon=False, fire_cuadrant=2, step_callback=None):
+def evaluate_agent(agent, env, eval_steps, eval_epsilon=False, fire_quadrant=2, step_callback=None):
     timemark = time.time()
-    state, info = env.reset(fire_cuadrant=fire_cuadrant)
+    state, info = env.reset(fire_quadrant=fire_quadrant)
     ep_reward = 0
     ep_steps = 0
     end = False
