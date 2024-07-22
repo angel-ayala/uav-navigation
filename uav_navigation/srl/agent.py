@@ -37,6 +37,28 @@ class SRLFunction:
                                  ae_params['decoder_weight_decay'])
         self.models.append(ae_model)
 
+    def compute_z(self, observations, latent_types=None):
+        z_hat = list()
+        # obs_2d, obs_1d = self.format_obs(observations)
+        if self.is_multimodal:
+            obs_2d, obs_1d = observations
+        elif self.is_pixels:
+            obs_2d = observations
+        else:
+            obs_1d = observations
+
+        for m in self.models:
+            if latent_types is None or m.type in latent_types:
+                if 'RGB' in m.type:
+                    z = m.encode_obs(obs_2d.to(self.device), detach=True)
+                if 'Vector' in m.type:
+                    z = m.encode_obs(obs_1d.to(self.device), detach=True)
+                if z.dim() == 1:
+                    z = z.unsqueeze(0)
+                z_hat.append(z)
+        z_hat = torch.cat(z_hat, dim=1)
+        return z_hat
+
     def compute_ae_loss(self, obs, actions, rewards, obs_t1, dones):
         if self.is_multimodal:
             obs_2d, obs_1d = self.format_obs(obs, augment=False)
@@ -184,6 +206,23 @@ class SRLQFunction(QFunction, SRLFunction):
         self.optimizer = torch.optim.AdamW(self.q_network.parameters(),
                                            lr=learning_rate, amsgrad=True)
 
+    def compute_q(self, observations, actions=None):
+        # Compute Q-values using the inferenced z latent representation
+        z_hat = self.compute_z(observations)
+        return super().compute_q(z_hat, actions)
+
+    def compute_q_target(self, observations, actions=None):
+        # Compute Q-values using the target Q-network
+        z_hat = self.compute_z(observations)
+        return super().compute_q_target(z_hat, actions)
+
+    def update(self, td_loss):
+        for m in self.models:
+            m.encoder_optim_zero_grad()
+        QFunction.update(self, td_loss)
+        for m in self.models:
+            m.encoder_optim_step()
+
     def save(self, path, ae_models, encoder_only=False):
         QFunction.save(self, path)
         SRLFunction.save(self, path, ae_models, encoder_only)
@@ -207,7 +246,7 @@ class SRLAgent:
         if priors:
             self.init_priors()
         self.init_ae_models(self.ae_models, encoder_only)
-        self.approximator.fuse_encoder()
+        # self.approximator.fuse_encoder()
 
     def init_ae_models(self, ae_models, encoder_only):
         for m, m_params in ae_models.items():
