@@ -12,6 +12,7 @@ from torch.nn import functional as F
 from torch import optim
 from info_nce import InfoNCE
 from uav_navigation.utils import soft_update_params
+from uav_navigation.utils import destack
 from uav_navigation.logger import summary_scalar
 
 from .net import preprocess_obs
@@ -52,21 +53,15 @@ def instance_autoencoder(ae_type, ae_params):
 def obs_reconstruction_loss(true_obs, rec_obs):
     if len(true_obs.shape) == 3:
         # de-stack
-        obs_shape = true_obs.shape
-        n_stack = obs_shape[1] // 1
-        r_shape = (obs_shape[0] * n_stack, ) + obs_shape[-1:]
-        true_obs = true_obs.reshape(r_shape)
-        output_obs = rec_obs.reshape(r_shape)
+        true_obs, _ = destack(true_obs, len_hist=3, is_rgb=False)
 
     if len(true_obs.shape) == 4:
         # preprocess images to be in [-0.5, 0.5] range
         true_obs = preprocess_obs(true_obs)
         # de-stack
-        obs_shape = true_obs.shape
-        n_stack = obs_shape[1] // 3
-        r_shape = (obs_shape[0] * n_stack, 3) + obs_shape[-2:]
-        true_obs = true_obs.reshape(r_shape)
-        output_obs = rec_obs.reshape(r_shape)
+        true_obs, _ = destack(true_obs, len_hist=3, is_rgb=True)
+    
+    output_obs = rec_obs.reshape(true_obs.shape)
 
     return F.mse_loss(output_obs, true_obs)
 

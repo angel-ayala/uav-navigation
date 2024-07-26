@@ -208,3 +208,14 @@ def evaluate_agent(agent, env, eval_steps, eval_epsilon=False, fire_quadrant=2, 
     if eval_epsilon:
         agent.epsilon = curr_epsilon
     return ep_reward, ep_steps, elapsed_time
+
+
+def destack(obs_stack, len_hist=3, is_rgb=False):
+    orig_shape = obs_stack.shape
+    if is_rgb:
+        n_stack = (orig_shape[1] // len_hist) * orig_shape[0]
+        obs_destack = obs_stack.reshape((n_stack, 3) + orig_shape[-2:])
+    else:
+        obs_destack = obs_stack.reshape(
+            (orig_shape[0] * len_hist, orig_shape[-1]))
+    return obs_destack, orig_shape

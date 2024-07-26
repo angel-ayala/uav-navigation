@@ -14,6 +14,7 @@ from uav_navigation.agent import QFunction
 from uav_navigation.agent import DDQNAgent
 from uav_navigation.logger import summary_scalar
 from uav_navigation.net import weight_init
+from uav_navigation.utils import destack
 from .autoencoder import instance_autoencoder
 from .priors import NorthBelief
 from .priors import PositionBelief
@@ -90,7 +91,18 @@ class SRLFunction:
                     ae_model.update_momentum_encoder(0.01)
                     total_loss.append(loss)
                 # else:
+                # compute target distances as reconstruction
+                pos_uav = obs_1d[:, :, 6:9]
+                pos_target = obs_1d[:, :, -3:]
+                dist = pos_uav - pos_target
+                # orientation = compute_orientation(pos_uav, pos_target)
+                orientation = torch.arctan2(dist[:, :, 0], dist[:, :, 1])
+                obs_1d[:, :, 13:] = dist
+                # """Apply UAV sensor offset."""
+                orientation -= torch.pi / 2.
+                orientation[orientation < -torch.pi] += 2 * torch.pi
                 obs_1d = self.normalize_vector(obs_1d)
+                obs_1d[:, :, 12] = torch.cos(orientation - obs_1d[:, :, 12])
                 loss = ae_model.compute_reconstruction_loss(obs_1d, obs_1d_augm, self.decoder_latent_lambda)
                 total_loss.append(loss)
         tloss = torch.sum(torch.stack(total_loss))

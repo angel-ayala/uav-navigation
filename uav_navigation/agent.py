@@ -13,6 +13,7 @@ import torch.nn as nn
 import torch.optim as optim
 from .utils import soft_update_params
 from .utils import format_obs
+from .utils import destack
 from .memory import is_prioritized_memory
 from .logger import summary_scalar
 # from .srl.net import adabelief_optimizer
@@ -50,10 +51,7 @@ class GenericFunction:
     def augment_image(self, obs_2d):
         if self.augment_model:
             # de-stack for correct augmentation
-            orig_shape = obs_2d.shape
-            n_stack = obs_2d.shape[1] // 3
-            obs_frames = obs_2d.reshape(
-                (obs_2d.shape[0] * n_stack, 3) + obs_2d.shape[-2:])
+            obs_frames, orig_shape = destack(obs_2d, len_hist=3, is_rgb=True)
             obs_2d = torch.cat([self.augment_model(frame.to(torch.uint8))
                                 for frame in obs_frames])
             obs_2d = obs_2d.reshape(orig_shape).to(torch.float32)
