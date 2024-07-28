@@ -16,6 +16,7 @@ from uav_navigation.logger import summary_scalar
 from uav_navigation.net import weight_init
 from uav_navigation.utils import destack
 from .autoencoder import instance_autoencoder
+from .autoencoder import latent_l2
 from .priors import NorthBelief
 from .priors import PositionBelief
 from .priors import OrientationBelief
@@ -95,18 +96,19 @@ class SRLFunction:
                 pos_uav = obs_1d[:, :, 6:9]
                 pos_target = obs_1d[:, :, -3:]
                 dist = pos_uav - pos_target
-                # orientation = compute_orientation(pos_uav, pos_target)
-                orientation = torch.arctan2(dist[:, :, 0], dist[:, :, 1])
                 obs_1d[:, :, 13:] = dist
+                # orientation difference
+                orientation = torch.arctan2(dist[:, :, 0], dist[:, :, 1])
                 # """Apply UAV sensor offset."""
                 orientation -= torch.pi / 2.
                 orientation[orientation < -torch.pi] += 2 * torch.pi
+                orientation_diff = torch.cos(orientation - obs_1d[:, :, 12])
                 obs_1d = self.normalize_vector(obs_1d)
-                obs_1d[:, :, 12] = torch.cos(orientation - obs_1d[:, :, 12])
+                obs_1d[:, :, 12] = orientation_diff
                 loss = ae_model.compute_reconstruction_loss(obs_1d, obs_1d_augm, self.decoder_latent_lambda)
                 total_loss.append(loss)
         tloss = torch.sum(torch.stack(total_loss))
-        summary_scalar("Loss/AutoEncoders", tloss.item())
+        # summary_scalar("Loss/AutoEncoders", tloss.item())
         return tloss
 
     def update_encoder(self, enc_loss):
@@ -299,7 +301,7 @@ class SRLAgent:
         if self.priors:
             rec_loss += self.approximator.compute_priors_loss(obs, obs_t1, actions)
 
-        summary_scalar("Loss/Representation", rec_loss.item())
+        # summary_scalar("Loss/Representation", rec_loss.item())
         self.approximator.update_representation(rec_loss)
 
     def update(self, step):
@@ -346,6 +348,22 @@ class SRLDDQNAgent(DDQNAgent, SRLAgent):
     def update(self, step):
         DDQNAgent.update(self, step, augment=False)
         SRLAgent.update(self, step)
+
+    def update_td(self, augment=True):
+        if not self.can_update:
+            return False
+        # Update the Q-network if replay buffer is sufficiently large
+        sampled_data = self.memory.sample(
+            self.batch_size, device=self.approximator.device)
+        td_loss = self.compute_td_loss(sampled_data, augment)
+        if self.is_prioritized:
+            states = sampled_data[0][0]
+        else:
+            states = sampled_data[0]
+        z_l2 = latent_l2(self.approximator.compute_z(states))
+        loss_z = self.approximator.decoder_latent_lambda * z_l2
+        summary_scalar(f'Loss/Encoder/QNetwork/L2', z_l2.item())
+        self.approximator.update(td_loss + loss_z)
 
     def save(self, path, encoder_only=False):
         self.approximator.save(path, self.ae_models, encoder_only)

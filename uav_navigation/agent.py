@@ -257,12 +257,7 @@ class DDQNAgent(GenericAgent):
         if step % self.target_update_freq == 0:
             self.approximator.update_target_network()
 
-    def update_td(self, augment=True):
-        if not self.can_update:
-            return False
-        # Update the Q-network if replay buffer is sufficiently large
-        sampled_data = self.memory.sample(
-            self.batch_size, device=self.approximator.device)
+    def compute_td_loss(self, sampled_data, augment=True):
         if self.is_prioritized:
             states, actions, rewards, next_states, dones = sampled_data[0]
             priorities = sampled_data[1]
@@ -292,6 +287,15 @@ class DDQNAgent(GenericAgent):
             td_loss = torch.mean(q_loss)
 
         summary_scalar('Loss/TDLoss', td_loss.item())
+        return td_loss
+
+    def update_td(self, augment=True):
+        if not self.can_update:
+            return False
+        # Update the Q-network if replay buffer is sufficiently large
+        sampled_data = self.memory.sample(
+            self.batch_size, device=self.approximator.device)
+        td_loss = self.compute_td_loss(sampled_data, augment)
         self.approximator.update(td_loss)
 
 
