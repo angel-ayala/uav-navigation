@@ -126,6 +126,8 @@ def parse_memory_args(parser):
                            help='Alpha prioritization exponent for PER.')
     arg_mem.add_argument("--prioritized-initial-beta", type=float, default=0.4,
                            help='Beta bias for sampling for PER.')
+    arg_mem.add_argument("--beta-steps", type=float, default=112500,
+                           help='Beta bias steps to reach 1.')
     return arg_mem
 
 
@@ -459,7 +461,7 @@ if __name__ == '__main__':
         memory_params.update(dict(
             alpha=args.prioritized_alpha,
             beta=args.prioritized_initial_beta,
-            beta_steps=args.steps // args.train_frequency
+            beta_steps=args.beta_steps
         ))
         memory_class = PrioritizedReplayBuffer
 

@@ -361,7 +361,7 @@ class SRLDDQNAgent(DDQNAgent, SRLAgent):
         else:
             states = sampled_data[0]
         z_l2 = latent_l2(self.approximator.compute_z(states))
-        loss_z = self.approximator.decoder_latent_lambda * z_l2
+        loss_z = 0.1 * z_l2
         summary_scalar(f'Loss/Encoder/QNetwork/L2', z_l2.item())
         self.approximator.update(td_loss + loss_z)
 
