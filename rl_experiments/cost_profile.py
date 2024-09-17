@@ -81,7 +81,7 @@ def run_profile(args):
 
     if is_srl:
         latent_dim = 0
-        q_network = q_network.q_network
+        # q_network = q_network.q_network
         for i, (ae_type, ae_params) in enumerate(agent_params['ae_models'].items()):
             ae_model = agent.approximator.models[i]
             print(f"{ae_type} AutoEncoder:")
