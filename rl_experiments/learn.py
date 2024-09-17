@@ -160,6 +160,8 @@ def parse_srl_args(parser):
                          help='Whether if use the RGB reconstruction model.')
     arg_srl.add_argument("--model-vector", action='store_true',
                          help='Whether if use the Vector reconstruction model.')
+    arg_srl.add_argument("--model-vector-target-dist", action='store_true',
+                         help='Whether if use the Vector reconstruction model.')
     arg_srl.add_argument("--model-pose", action='store_true',
                          help='Whether if use the Pose reconstruction model.')
     arg_srl.add_argument("--model-atc", action='store_true',
@@ -330,6 +332,15 @@ def args2ae_model(args, env_params):
                                    encoder_lr=args.encoder_lr,
                                    decoder_lr=args.decoder_lr,
                                    decoder_weight_decay=args.decoder_weight_decay)
+    if args.model_vector_target_dist:
+        assert env_params['is_vector'], 'Vector model requires is_vector flag.'
+        ae_models['VectorTargetDist'] = dict(vector_shape=vector_shape,
+                                             hidden_dim=args.hidden_dim,
+                                             latent_dim=args.latent_dim,
+                                             num_layers=args.num_layers,
+                                             encoder_lr=args.encoder_lr,
+                                             decoder_lr=args.decoder_lr,
+                                             decoder_weight_decay=args.decoder_weight_decay)
     if args.model_atc:
         assert env_params['is_pixels'], 'ATC model requires is_pixels flag.'
         ae_models['ATC'] = dict(image_shape=image_shape,

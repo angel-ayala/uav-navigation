@@ -91,20 +91,22 @@ class SRLFunction:
                     loss = ae_model.compute_contrastive_loss(obs_1d_augm, obs_1d_t1_augm, rewards)
                     ae_model.update_momentum_encoder(0.01)
                     total_loss.append(loss)
-                # else:
-                # compute target distances as reconstruction
-                pos_uav = obs_1d[:, :, 6:9]
-                pos_target = obs_1d[:, :, -3:]
-                dist = pos_uav - pos_target
-                obs_1d[:, :, 13:] = dist
-                # orientation difference
-                orientation = torch.arctan2(dist[:, :, 0], dist[:, :, 1])
-                # """Apply UAV sensor offset."""
-                orientation -= torch.pi / 2.
-                orientation[orientation < -torch.pi] += 2 * torch.pi
-                orientation_diff = torch.cos(orientation - obs_1d[:, :, 12])
-                obs_1d = self.normalize_vector(obs_1d)
-                obs_1d[:, :, 12] = orientation_diff
+                elif "TargetDist" in ae_model.type:
+                    # compute target distances as reconstruction
+                    pos_uav = obs_1d[:, :, 6:9]
+                    pos_target = obs_1d[:, :, -3:]
+                    dist = pos_uav - pos_target
+                    obs_1d[:, :, 13:] = dist
+                    # orientation difference
+                    orientation = torch.arctan2(dist[:, :, 0], dist[:, :, 1])
+                    # """Apply UAV sensor offset."""
+                    orientation -= torch.pi / 2.
+                    orientation[orientation < -torch.pi] += 2 * torch.pi
+                    orientation_diff = torch.cos(orientation - obs_1d[:, :, 12])
+                    obs_1d = self.normalize_vector(obs_1d)
+                    obs_1d[:, :, 12] = orientation_diff
+                else:
+                    obs_1d = self.normalize_vector(obs_1d)
                 loss = ae_model.compute_reconstruction_loss(obs_1d, obs_1d_augm, self.decoder_latent_lambda)
                 total_loss.append(loss)
         tloss = torch.sum(torch.stack(total_loss))

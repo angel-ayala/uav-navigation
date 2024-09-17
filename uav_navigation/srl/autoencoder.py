@@ -39,6 +39,8 @@ def instance_autoencoder(ae_type, ae_params):
         ae_model = RGBModel(ae_params)
     if ae_type == 'Vector':
         ae_model = VectorModel(ae_params)
+    if ae_type == 'VectorTargetDist':
+        ae_model = VectorTargetDistModel(ae_params)
     if ae_type == 'VectorATC':
         ae_model = VectorATCModel(ae_params)
     if ae_type == 'ATC':
@@ -297,6 +299,12 @@ class VectorModel(AEModel):
         self.encoder.append(vector_encoder)
         if not model_params['encoder_only']:
             self.decoder.append(vector_decoder)
+
+
+class VectorTargetDistModel(VectorModel):
+    def __init__(self, model_params):
+        super(VectorTargetDistModel, self).__init__(model_params)
+        self.type = 'VectorTargetDist'
 
 
 class RGBModel(AEModel):
