@@ -18,6 +18,7 @@ from uav_navigation.utils import load_json_dict
 from uav_navigation.utils import evaluate_agent
 
 from webots_drone.data import StoreStepData
+from webots_drone.data import VideoCallback
 
 from learn import list_of_float
 from learn import list_of_int
@@ -112,6 +113,10 @@ def run_evaluation(seed_val, logpath, episode):
     agent_params.update(
         dict(approximator=q_approximator(**approximator_params)))
     training_params = load_json_dict(logpath / 'args_training.json')
+    
+    # Video recording callback
+    videos_path = logpath / "videos"
+    vidcb = VideoCallback(videos_path, env)
     for log_ep, agent_path in enumerate(agent_paths):
         if episode > 0 and log_ep != episode:
             continue
@@ -121,11 +126,13 @@ def run_evaluation(seed_val, logpath, episode):
         store_callback = StoreStepData(
             logpath / f"history_eval_{log_ep+1:03d}.csv")
         store_callback._ep = log_ep
-        for fc in target_pos:
+        for fq in target_pos:
+            vidcb.start_recording(videos_path / f"ep{log_ep:03d}_fq{fq:02d}.mp4")
             evaluate_agent(agent, env, args.eval_steps,
                            training_params['eval_epsilon'],
-                           fire_quadrant=fc,
+                           fire_quadrant=fq,
                            step_callback=store_callback)
+            vidcb.stop_recording()
 
 
 if __name__ == '__main__':
