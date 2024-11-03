@@ -137,6 +137,19 @@ class VectorDecoder(MLP):
         return out
 
 
+class VectorDiffDecoder(MLP):
+    def __init__(self, state_shape, latent_dim, hidden_dim, num_layers=2):
+        super(VectorDiffDecoder, self).__init__(
+            latent_dim, state_shape[-1], hidden_dim, num_layers=num_layers)
+
+    def forward(self, z):
+        h = z
+        for hidden_layer in self.h_layers[:-1]:
+            h = torch.relu(hidden_layer(h))
+        out = self.h_layers[-1](h)
+        return out
+
+
 class VectorMDPEncoder(VectorEncoder):
     def __init__(self, state_shape, latent_dim, hidden_dim, num_layers=2):
         super(VectorMDPEncoder, self).__init__(

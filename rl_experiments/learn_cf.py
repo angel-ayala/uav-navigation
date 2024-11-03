@@ -49,19 +49,19 @@ def parse_environment_args(parser):
                          help='Max time (seconds) of the mission.')
     arg_env.add_argument("--time-no-action", type=int, default=5,
                          help='Max time (seconds) with no movement.')
-    arg_env.add_argument("--frame-skip", type=int, default=25,  # 200ms
+    arg_env.add_argument("--frame-skip", type=int, default=6,  # 192ms
                          help='Number of simulation steps for a RL step')
     arg_env.add_argument("--frame-stack", type=int, default=1,
                          help='Number of RL step to stack as observation.')
-    arg_env.add_argument("--goal-threshold", type=float, default=5.,
+    arg_env.add_argument("--goal-threshold", type=float, default=0.5,
                          help='Minimum distance from the target.')
-    arg_env.add_argument("--init-altitude", type=float, default=25.,
+    arg_env.add_argument("--init-altitude", type=float, default=1.0,
                          help='Minimum height distance to begin the mission.')
     arg_env.add_argument("--altitude-limits", type=list_of_float,
-                         default=[11., 75.], help='Vertical flight limits.')
+                         default=[0.25, 2.25], help='Vertical flight limits.')
     arg_env.add_argument("--target-pos", type=int, default=None,
                          help='Cuadrant number for target position.')
-    arg_env.add_argument("--target-dim", type=list_of_float, default=[7., 3.5],
+    arg_env.add_argument("--target-dim", type=list_of_float, default=[0.025, 0.02],
                          help="Target's dimension size.")
     arg_env.add_argument("--zone-steps", type=int, default=0,
                          help='Max number on target area to end the episode with found target.')
@@ -409,7 +409,7 @@ if __name__ == '__main__':
     np.random.seed(args.seed)
 
     # Environment
-    environment_name = 'webots_drone:webots_drone/DroneEnvDiscrete-v0'
+    environment_name = 'webots_drone:webots_drone/CrazyflieEnvDiscrete-v0'
     env, env_params = instance_env(args, environment_name, seed=args.seed)
     # Observation preprocessing
     env, env_params = wrap_env(env, env_params)
@@ -509,13 +509,14 @@ if __name__ == '__main__':
         path_suffix = '-srl' if args.is_srl else ''
         timestamp = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
         # Summary folder
-        outfolder = Path(f"logs_{path_prefix}/ddqn{path_suffix}_{timestamp}")
+        outfolder = Path(f"logs_cf_{path_prefix}/ddqn{path_suffix}_{timestamp}")
     else:
         outfolder = Path(args.logspath)
     outfolder.mkdir(parents=True)
     print('Saving logs at:', outfolder)
 
     store_callback = StoreStepData(outfolder / 'history_training.csv',
+                                   n_sensors=0,
                                    epsilon=lambda: agent.epsilon)
 
     run_params = dict(

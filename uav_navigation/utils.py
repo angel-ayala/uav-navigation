@@ -6,7 +6,6 @@ Created on Sun Nov 26 14:54:52 2023
 @author: Angel Ayala
 """
 import json
-import gym
 import numpy as np
 import time
 import sys

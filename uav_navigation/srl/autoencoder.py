@@ -20,18 +20,20 @@ from .net import rgb_reconstruction_model
 from .net import PixelDecoder
 from .net import PixelMDPEncoder
 from .net import vector_reconstruction_model
-from .net import VectorMDPEncoder
+from .net import VectorEncoder
 from .net import VectorDecoder
+from .net import VectorDiffDecoder
+from .net import VectorMDPEncoder
+from .net import adabelief_optimizer
+from ..logger import log_image_batch
 # from .net import imu2pose_model
 # from .net import slowness_cost
 # from .net import variability_cost
 # from .net import proportionality_cost
 # from .net import repeatability_cost
-from .net import adabelief_optimizer
 # from .loss import SSIM_Loss
 # from .net import logarithmic_difference_loss
 # from .net import BiGRU
-from ..logger import log_image_batch
 
 
 def instance_autoencoder(ae_type, ae_params):
@@ -41,6 +43,8 @@ def instance_autoencoder(ae_type, ae_params):
         ae_model = VectorModel(ae_params)
     if ae_type == 'VectorTargetDist':
         ae_model = VectorTargetDistModel(ae_params)
+    if ae_type == 'VectorDifference':
+        ae_model = VectorDifferenceModel(ae_params)
     if ae_type == 'VectorATC':
         ae_model = VectorATCModel(ae_params)
     if ae_type == 'ATC':
@@ -277,14 +281,12 @@ class AEModel:
 
 
     def __repr__(self):
-        out_str = "Encoders:\n"
+        out_str = f"{self.type}Model:\n"
         for e in self.encoder:
-            out_str += str(e)
-            out_str += '\n'
-        out_str += "Decoders:\n"
+            out_str += str(e) + '\n'
+        out_str += '\n'
         for d in self.decoder:
-            out_str += str(d)
-            out_str += '\n'
+            out_str += str(d) + '\n'
         return out_str
 
 
@@ -305,6 +307,24 @@ class VectorTargetDistModel(VectorModel):
     def __init__(self, model_params):
         super(VectorTargetDistModel, self).__init__(model_params)
         self.type = 'VectorTargetDist'
+
+
+class VectorDifferenceModel(AEModel):
+    def __init__(self, model_params):
+        super(VectorDifferenceModel, self).__init__('VectorDifference')
+        self.encoder.append(
+            VectorEncoder(model_params['vector_shape'],
+                          model_params['latent_dim'],
+                          model_params['hidden_dim'],
+                          num_layers=model_params['num_layers'])
+            )
+        if not model_params['encoder_only']:
+            self.decoder.append(
+                VectorDiffDecoder(model_params['vector_shape'],
+                                  model_params['latent_dim'],
+                                  model_params['hidden_dim'],
+                                  num_layers=model_params['num_layers'])
+                                )
 
 
 class RGBModel(AEModel):

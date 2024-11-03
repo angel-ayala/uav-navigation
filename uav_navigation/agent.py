@@ -16,7 +16,6 @@ from .utils import format_obs
 from .utils import destack
 from .memory import is_prioritized_memory
 from .logger import summary_scalar
-# from .srl.net import adabelief_optimizer
 
 
 class GenericFunction:
@@ -38,13 +37,13 @@ class GenericFunction:
 
     def normalize_image(self, obs):
         if self.is_multimodal:
-            return obs[0] / torch.tensor(self.obs_space[0].high, device=self.device)
+            return obs / torch.tensor(self.obs_space[0].high, device=self.device)
         else:
             return obs / torch.tensor(self.obs_space.high, device=self.device)
 
     def normalize_vector(self, obs):
         if self.is_multimodal:
-            return obs[1] / torch.tensor(self.obs_space[1].high, device=self.device)
+            return obs / torch.tensor(self.obs_space[1].high, device=self.device)
         else:
             return obs / torch.tensor(self.obs_space.high, device=self.device)
 

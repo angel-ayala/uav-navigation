@@ -14,7 +14,6 @@ from uav_navigation.agent import QFunction
 from uav_navigation.agent import DDQNAgent
 from uav_navigation.logger import summary_scalar
 from uav_navigation.net import weight_init
-from uav_navigation.utils import destack
 from .autoencoder import instance_autoencoder
 from .autoencoder import latent_l2
 from .priors import NorthBelief
@@ -22,6 +21,27 @@ from .priors import PositionBelief
 from .priors import OrientationBelief
 from .priors import DistanceBelief
 from .net import QNetworkWrapper
+
+
+def target_pos2dist(obs_1d):
+    # replace target_pos by target_dist
+    _obs_1d = obs_1d.detach().clone()
+    pos_uav = _obs_1d[:, :, 6:9]
+    pos_target = _obs_1d[:, :, -3:]
+    dist = pos_uav - pos_target
+    _obs_1d[:, :, 13:] = dist
+    return _obs_1d
+
+
+def dist2orientation_diff(obs_1d):
+    # orientation difference
+    _obs_1d = obs_1d.detach().clone()
+    orientation = torch.arctan2(_obs_1d[:, :, 13], _obs_1d[:, :, 14])
+    # """Apply UAV sensor offset."""
+    orientation -= torch.pi / 2.
+    orientation[orientation < -torch.pi] += 2 * torch.pi
+    orientation_diff = torch.cos(orientation - _obs_1d[:, :, 12])
+    return orientation_diff
 
 
 class SRLFunction:
@@ -93,18 +113,31 @@ class SRLFunction:
                     total_loss.append(loss)
                 elif "TargetDist" in ae_model.type:
                     # compute target distances as reconstruction
-                    pos_uav = obs_1d[:, :, 6:9]
-                    pos_target = obs_1d[:, :, -3:]
-                    dist = pos_uav - pos_target
-                    obs_1d[:, :, 13:] = dist
+                    obs_1d = target_pos2dist(obs_1d)
                     # orientation difference
-                    orientation = torch.arctan2(dist[:, :, 0], dist[:, :, 1])
-                    # """Apply UAV sensor offset."""
-                    orientation -= torch.pi / 2.
-                    orientation[orientation < -torch.pi] += 2 * torch.pi
-                    orientation_diff = torch.cos(orientation - obs_1d[:, :, 12])
+                    orientation_diff = dist2orientation_diff(obs_1d)
                     obs_1d = self.normalize_vector(obs_1d)
                     obs_1d[:, :, 12] = orientation_diff
+                elif "Difference" in ae_model.type:
+                    # target distances
+                    # print('original obs_1d', obs_1d.shape, obs_1d[0])
+                    obs_1d = target_pos2dist(obs_1d)
+                    # print('after_distance obs_1d', obs_1d.shape, obs_1d[0])
+                    orientation_diff = dist2orientation_diff(obs_1d)
+                    # orientation difference
+                    obs_1d[:, :, 12] = orientation_diff + 1
+                    # print('after orientation_diff obs_1d', obs_1d.shape, obs_1d[0])
+                    while obs_1d.shape[1] > 1:
+                        obs_1d = torch.diff(obs_1d, dim=1)
+                    # print('after torch_diff obs_1d', obs_1d.shape)
+                    norm_obs_1d = self.normalize_vector(obs_1d)[:, 0]
+                    obs_1d = obs_1d.squeeze(1)
+                    # print('norm_obs_1d', norm_obs_1d.shape)
+                    obs_1d[:, :12] = norm_obs_1d[:, :12]
+                    obs_1d[:, 13:] = norm_obs_1d[:, 13:]
+                    # print('after norm obs_1d', obs_1d.shape)
+                    obs_1d[:, 12] -= 1
+                    # print('final obs_1d', obs_1d.shape, obs_1d[0])
                 else:
                     obs_1d = self.normalize_vector(obs_1d)
                 loss = ae_model.compute_reconstruction_loss(obs_1d, obs_1d_augm, self.decoder_latent_lambda)
