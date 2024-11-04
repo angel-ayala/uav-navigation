@@ -285,13 +285,19 @@ def instance_env(args, name='webots_drone:webots_drone/DroneEnvDiscrete-v0',
 
 
 def wrap_env(env, env_params):
+    env_range = {
+        'angles_range': [np.pi/6, np.pi/6, np.pi],
+        'avel_range': [np.pi/3, np.pi/3, 2*np.pi],
+        'speed_range': [0.8, 0.8, 0.6]
+        }
     if env_params['is_multimodal']:
         env = MultiModalObservation(env, uav_data=env_params['uav_data'],
                                     frame_stack=env_params['frame_stack'],
                                     target_pos=env_params['target_pos'],
                                     target_dim=env_params['target_dim'],
                                     target_dist=env_params['target_dist'],
-                                    add_action=env_params['action2obs'])
+                                    add_action=env_params['action2obs'],
+                                    **env_range)
         env_params['image_shape'] = env.observation_space[0].shape
         env_params['vector_shape'] = env.observation_space[1].shape
 
@@ -301,7 +307,8 @@ def wrap_env(env, env_params):
                                           target_dist=env_params['target_dist'],
                                           target_pos=env_params['target_pos'],
                                           target_dim=env_params['target_dim'],
-                                          add_action=env_params['action2obs'])
+                                          add_action=env_params['action2obs'],
+                                          **env_range)
 
         if env_params['frame_stack'] > 1:
             env = ObservationStack(env, k=env_params['frame_stack'])
