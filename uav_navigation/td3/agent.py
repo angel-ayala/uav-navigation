@@ -88,7 +88,7 @@ class TD3Function(GenericFunction):
                  use_augmentation=True):
         super(TD3Function, self).__init__(obs_space, use_cuda,
                                           is_pixels, is_multimodal, use_augmentation)
-        self.max_action = torch.tensor(max_action)
+        self.max_action = torch.tensor(max_action, device=self.device)
         self.actor = Actor(latent_dim, action_shape[-1], self.max_action,
                            hidden_dim).to(self.device)
         self.actor_target = copy.deepcopy(self.actor)
@@ -102,17 +102,18 @@ class TD3Function(GenericFunction):
                                                  lr=critic_lr)
 
         self.tau = tau
-        self.policy_noise = torch.tensor(policy_noise) * self.max_action
-        self.noise_clip = torch.tensor(noise_clip) * self.max_action
+        self.policy_noise = torch.tensor(policy_noise, device=self.device)
+        self.policy_noise *= self.max_action
+        self.noise_clip = torch.tensor(noise_clip, device=self.device)
+        self.noise_clip *= self.max_action
         self.policy_freq = policy_freq
 
     def action_inference(self, obs):
-        state = torch.FloatTensor(obs.reshape(1, -1)).to(self.device)
-        return self.actor(state).cpu().data.numpy().flatten()
+        return self.actor(obs).cpu().data.numpy().flatten()
 
     def sample_action(self, obs, expl_noise=0.1):
-        # TODO: evaluation shoudl have expl_noise=0
-        max_action = self.max_action.numpy()
+        # TODO: evaluation should have expl_noise=0
+        max_action = self.max_action.cpu().numpy()
         action_noise = np.random.normal(0, max_action * expl_noise)
         action = self.action_inference(obs) + action_noise
         return action.clip(-max_action, max_action)
