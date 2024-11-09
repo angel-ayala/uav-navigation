@@ -56,9 +56,12 @@ def soft_update_params(net, target_net, tau):
         target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
 
 
-def do_step(agent, env, state, callback=None, must_remember=True):
+def do_step(agent, env, state, callback=None, must_remember=True, random_step=False):
     # Choose action using the agent's policy
-    action = agent.select_action(state)
+    if random_step:
+        action = env.action_space.sample()
+    else:
+        action = agent.select_action(state)
 
     # Take the chosen action
     next_state, reward, done, trunc, info = env.step(action)
@@ -86,7 +89,7 @@ def format_obs(observation, is_pixels=False):
 
     if len(observation.shape) == 3 and is_pixels:
         observation = observation.unsqueeze(0)
-    if len(observation.shape) <= 2 and not is_pixels:
+    elif len(observation.shape) == 1 and not is_pixels:
         observation = observation.unsqueeze(0)
 
     return observation
@@ -111,7 +114,7 @@ def run_agent(agent, env, training_steps, mem_steps, eval_interval,
                 if step_callback:
                     step_callback.set_init_state(state, info)
             action, reward, next_state, ended = do_step(
-                agent, env, state, step_callback, must_remember=True)
+                agent, env, state, step_callback, must_remember=True, random_step=True)
             state = next_state
         elapsed_time = time.time() - timemark
         membar.clear()

@@ -45,7 +45,7 @@ def uav_data_list(arg):
 
 def parse_environment_args(parser):
     arg_env = parser.add_argument_group('Environment')
-    arg_env.add_argument("--time-limit", type=int, default=600,  # 10m
+    arg_env.add_argument("--time-limit", type=int, default=60,  # 1m
                          help='Max time (seconds) of the mission.')
     arg_env.add_argument("--time-no-action", type=int, default=5,
                          help='Max time (seconds) with no movement.')
@@ -61,7 +61,7 @@ def parse_environment_args(parser):
                          default=[0.25, 2.25], help='Vertical flight limits.')
     arg_env.add_argument("--target-pos", type=int, default=None,
                          help='Cuadrant number for target position.')
-    arg_env.add_argument("--target-dim", type=list_of_float, default=[0.025, 0.02],
+    arg_env.add_argument("--target-dim", type=list_of_float, default=[0.05, 0.02],
                          help="Target's dimension size.")
     arg_env.add_argument("--zone-steps", type=int, default=0,
                          help='Max number on target area to end the episode with found target.')
@@ -523,7 +523,7 @@ if __name__ == '__main__':
     print('Saving logs at:', outfolder)
 
     store_callback = StoreStepData(outfolder / 'history_training.csv',
-                                   n_sensors=0,
+                                   n_sensors=4,
                                    epsilon=lambda: agent.epsilon)
 
     run_params = dict(

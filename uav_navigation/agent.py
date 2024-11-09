@@ -234,7 +234,7 @@ class DDQNAgent(GenericAgent):
             return np.random.randint(self.action_shape[-1])  # Explore
         else:
             with torch.no_grad():
-                observation = self.approximator.format_obs(state)
+                observation = self.approximator.format_obs(state).unsqueeze(0)
                 q_values = self.approximator.compute_q(
                     observation).cpu().numpy()
             return np.argmax(q_values)  # Exploit

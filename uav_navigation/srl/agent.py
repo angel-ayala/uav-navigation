@@ -26,21 +26,36 @@ from .net import QNetworkWrapper
 def target_pos2dist(obs_1d):
     # replace target_pos by target_dist
     _obs_1d = obs_1d.detach().clone()
-    pos_uav = _obs_1d[:, :, 6:9]
-    pos_target = _obs_1d[:, :, -3:]
+    if _obs_1d.dim() == 3:
+        pos_uav = _obs_1d[:, :, 6:9]
+        pos_target = _obs_1d[:, :, -3:]
+    elif _obs_1d.dim() == 2:
+        pos_uav = _obs_1d[:, 6:9]
+        pos_target = _obs_1d[:, -3:]
+        
     dist = pos_uav - pos_target
-    _obs_1d[:, :, 13:] = dist
+    if _obs_1d.dim() == 3:
+        _obs_1d[:, :, 13:] = dist
+    elif _obs_1d.dim() == 2:
+        _obs_1d[:, 13:] = dist
+        
     return _obs_1d
 
 
 def dist2orientation_diff(obs_1d):
     # orientation difference
     _obs_1d = obs_1d.detach().clone()
-    orientation = torch.arctan2(_obs_1d[:, :, 13], _obs_1d[:, :, 14])
+    if _obs_1d.dim() == 3:
+        orientation = torch.arctan2(_obs_1d[:, :, 13], _obs_1d[:, :, 14])
+    elif _obs_1d.dim() == 2:
+        orientation = torch.arctan2(_obs_1d[:, 13], _obs_1d[:, 14])
     # """Apply UAV sensor offset."""
     orientation -= torch.pi / 2.
     orientation[orientation < -torch.pi] += 2 * torch.pi
-    orientation_diff = torch.cos(orientation - _obs_1d[:, :, 12])
+    if _obs_1d.dim() == 3:
+        orientation_diff = torch.cos(orientation - _obs_1d[:, :, 12])
+    elif _obs_1d.dim() == 2:
+        orientation_diff = torch.cos(orientation - _obs_1d[:, 12])
     return orientation_diff
 
 
@@ -117,10 +132,14 @@ class SRLFunction:
                     # orientation difference
                     orientation_diff = dist2orientation_diff(obs_1d)
                     obs_1d = self.normalize_vector(obs_1d)
-                    obs_1d[:, :, 12] = orientation_diff
+                    if obs_1d.dim() == 3:
+                        obs_1d[:, :, 12] = orientation_diff
+                    elif obs_1d.dim() == 2:
+                        obs_1d[:, 12] = orientation_diff
                 elif "Difference" in ae_model.type:
                     # target distances
                     # print('original obs_1d', obs_1d.shape, obs_1d[0])
+                    assert obs_1d.dim() > 1, "DifferenceModel should be used with frame-stack > 1"
                     obs_1d = target_pos2dist(obs_1d)
                     # print('after_distance obs_1d', obs_1d.shape, obs_1d[0])
                     orientation_diff = dist2orientation_diff(obs_1d)
@@ -323,18 +342,19 @@ class SRLAgent:
                                            prior_params['target_obs'],
                                            learning_rate=prior_params['learning_rate'])
     def update_reconstruction(self):
-        sampled_data = self.memory.random_sample(self.batch_size, device=self.approximator.device)
 
         if self.is_prioritized:
+            sampled_data = self.memory.random_sample(self.batch_size, device=self.approximator.device)
             obs, actions, rewards, obs_t1, dones = sampled_data[0]
         else:
+            sampled_data = self.memory.sample(self.batch_size, device=self.approximator.device)
             obs, actions, rewards, obs_t1, dones = sampled_data
 
         rec_loss = self.approximator.compute_ae_loss(obs, actions, rewards, obs_t1, dones)
         # TODO: implement state representation learning loss
 
-        if self.priors:
-            rec_loss += self.approximator.compute_priors_loss(obs, obs_t1, actions)
+        # if self.priors:
+        #     rec_loss += self.approximator.compute_priors_loss(obs, obs_t1, actions)
 
         # summary_scalar("Loss/Representation", rec_loss.item())
         self.approximator.update_representation(rec_loss)
