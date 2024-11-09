@@ -159,6 +159,9 @@ class SRLFunction:
                     # print('final obs_1d', obs_1d.shape, obs_1d[0])
                 else:
                     obs_1d = self.normalize_vector(obs_1d)
+                # supress outliers
+                obs_1d[obs_1d > 1.] = 1.
+                obs_1d[obs_1d < -1.] = -1.
                 loss = ae_model.compute_reconstruction_loss(obs_1d, obs_1d_augm, self.decoder_latent_lambda)
                 total_loss.append(loss)
         tloss = torch.sum(torch.stack(total_loss))
