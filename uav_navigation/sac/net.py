@@ -10,7 +10,8 @@ import torch
 import torch.nn as nn
 from torch import distributions as pyd
 from torch.nn import functional as F
-from ..net import weight_init
+from uav_navigation.net import weight_init
+from uav_navigation.net import Conv1dMLP
 
 
 def gaussian_logprob(noise, log_std):
@@ -78,43 +79,20 @@ class SquashedNormal(pyd.transformed_distribution.TransformedDistribution):
         return mu
 
 
-class DiagGaussianActor(nn.Module):
+class DiagGaussianActor(Conv1dMLP):
     """torch.distributions implementation of an diagonal Gaussian policy.
     taken from https://github.com/denisyarats/pytorch_sac/blob/master/agent/actor.py"""
 
-    def __init__(self, obs_dim, action_dim, hidden_dim, log_std_bounds):
-        super().__init__()
+    def __init__(self, state_dim, action_dim, hidden_dim, log_std_bounds):
+        super(DiagGaussianActor, self).__init__(
+            state_dim, 2 * action_dim, hidden_dim, num_layers=2)
 
         self.log_std_bounds = log_std_bounds
-        # hidden_dim1 = hidden_dim
-        if isinstance(obs_dim, int):
-            f_layer = [nn.Linear(obs_dim, hidden_dim), nn.ReLU(inplace=True)]            
-        elif len(obs_dim) == 2:
-            f_layer = [nn.LSTM(obs_dim[-1], hidden_dim, num_layers=1,
-                               batch_first=True, bidirectional=False)]
-            # hidden_dim1 = hidden_dim #* 2
-        elif len(obs_dim) == 1:
-            f_layer = [nn.Linear(obs_dim[-1], hidden_dim), nn.ReLU(inplace=True)]            
-        else:
-            raise NotImplementedError("First layer not implemented.")
-        self.f_layer = nn.Sequential(*f_layer)
-        self.trunk = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim),  nn.ReLU(inplace=True),
-            nn.Linear(hidden_dim, 2 * action_dim)
-        )
-
         self.apply(weight_init)
 
     def forward(self, obs):
-        if isinstance(self.f_layer[0], nn.LSTM):
-            # process hidden states
-            _, (h, _)= self.f_layer(obs)
-            h = h.squeeze(0)
-            h = torch.relu(h)
-        else:
-            h = self.f_layer(obs)
-
-        mu, log_std = self.trunk(h).chunk(2, dim=-1)
+        h = self.forward_h(obs)
+        mu, log_std = self.h_layers[-1](h).chunk(2, dim=-1)
 
         # constrain log_std inside [log_std_min, log_std_max]
         log_std = torch.tanh(log_std)
@@ -127,60 +105,28 @@ class DiagGaussianActor(nn.Module):
         return dist
 
 
-class QFunction(nn.Module):
-    """MLP for action-state function."""
-    def __init__(self, obs_dim, action_dim, hidden_dim, preprocess=False):
-        super().__init__()
-
-        self.preprocess = preprocess
-
-        if isinstance(obs_dim, int):
-            input_dim = obs_dim + action_dim
-            f_layer = [nn.Linear(input_dim, hidden_dim), nn.ReLU(inplace=True)]
-        elif len(obs_dim) == 2:
-            input_dim = obs_dim[-1] + action_dim
-            self.preprocess = nn.Sequential(
-                nn.Conv1d(obs_dim[0], obs_dim[-1], kernel_size=obs_dim[-1]),
-                nn.Tanh())
-            f_layer = [nn.Linear(input_dim, hidden_dim), nn.ReLU(inplace=True)]     
-        elif len(obs_dim) == 1:
-            input_dim = obs_dim[-1] + action_dim
-            f_layer = [nn.Linear(input_dim, hidden_dim), nn.ReLU(inplace=True)]     
-        self.f_layer = nn.Sequential(*f_layer)
-
-        self.trunk = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim),  nn.ReLU(inplace=True),
-            nn.Linear(hidden_dim, 1)
-        )
-
-    def forward(self, obs, action):
-        assert obs.size(0) == action.size(0)
-        
-        if self.preprocess:
-            obs = self.preprocess(obs)
-            if len(obs.shape) == 3:
-                obs = obs.squeeze(-1)
-
-        obs_action = torch.cat([obs, action], dim=1)
-        h = self.f_layer(obs_action)
-        if isinstance(self.f_layer[0], nn.Conv1d):
-            h = h.squeeze(-1)
-
-        return self.trunk(h)
-
-
 class Critic(nn.Module):
-    """Critic network, employes two q-functions."""
-    def __init__(self, latent_dim, action_shape, hidden_dim, preprocess=False):
-        super().__init__()
-
-        self.Q1 = QFunction(latent_dim, action_shape[0], hidden_dim, preprocess=preprocess)
-        self.Q2 = QFunction(latent_dim, action_shape[0], hidden_dim, preprocess=preprocess)
-
+    """MLP for Critic function."""
+    def __init__(self, state_dim, action_dim, hidden_dim=256):
+        super(Critic, self).__init__()
+        if len(state_dim) == 2:
+            state_action_dim = (state_dim[0], state_dim[1] + action_dim)
+        elif len(state_dim) == 1:
+            state_action_dim = (state_dim[0] + action_dim, )
+        # Q1 architecture
+        self.q1_network = Conv1dMLP(state_action_dim, 1, hidden_dim,
+                                    num_layers=2)
+        # Q2 architecture
+        self.q2_network = Conv1dMLP(state_action_dim, 1, hidden_dim,
+                                    num_layers=2)
         self.apply(weight_init)
 
-    def forward(self, obs, action):
-        q1 = self.Q1(obs, action)
-        q2 = self.Q2(obs, action)
+    def forward(self, state, action):
+        if state.ndim == 3:
+            action = action.unsqueeze(1)
+            action = action.repeat([1, state.shape[1], 1])
+        sa = torch.cat([state, action], state.ndim - 1)
+        q1 = self.q1_network(sa)
+        q2 = self.q2_network(sa)
 
         return q1, q2

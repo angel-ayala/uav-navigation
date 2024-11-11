@@ -8,39 +8,16 @@ Based on:
 "Improving Sample Efficiency in Model-Free Reinforcement Learning from Images"
 https://arxiv.org/abs/1910.01741
 """
-from thop import clever_format
+import torch
+import copy
+from uav_navigation.srl.agent import SRLAgent
+from uav_navigation.srl.agent import SRLFunction
+from uav_navigation.srl.autoencoder import latent_l2
+from uav_navigation.srl.net import QNetworkWrapper
+from uav_navigation.logger import summary_scalar
+
 from .agent import ACFunction
 from .agent import SACAgent
-from .agent import profile_actor_critic
-from ..srl.agent import SRLAgent
-from ..srl.agent import SRLFunction
-from ..srl.autoencoder import profile_ae_model
-
-
-def profile_srl_approximator(approximator, state_shape, action_shape):
-    total_flops, total_params = 0, 0
-    q_feature_dim = 0
-    for m in approximator.models:
-        if approximator.is_multimodal:
-            if m.type in ['rgb', 'atc']:
-                flops, params = profile_ae_model(m, state_shape[0], approximator.device)
-            if m.type == 'vector':
-                flops, params = profile_ae_model(m, state_shape[1], approximator.device)
-        else:
-            flops, params = profile_ae_model(m, state_shape, approximator.device)
-        total_flops += flops
-        total_params += params
-        q_feature_dim += m.encoder[0].feature_dim
-
-    # profile q-network
-    flops, params = profile_actor_critic(approximator, q_feature_dim,
-                                         action_shape)
-    total_flops += flops
-    total_params += params
-    print('Total: {} flops, {} params'.format(
-        *clever_format([total_flops, total_params], "%.3f")))
-    return total_flops, total_params
-
 
 
 class SRLSACFunction(ACFunction, SRLFunction):
@@ -88,21 +65,52 @@ class SRLSACFunction(ACFunction, SRLFunction):
                             use_augmentation)
         SRLFunction.__init__(self, decoder_latent_lambda)
         self.encoder_tau = encoder_tau
+    
+    def fuse_encoder(self):
+        # fuse encoder with Critic function
+        critic = copy.deepcopy(self.critic)
+        encoder = copy.deepcopy(self.models[0].encoder[0])
+        self.critic = QNetworkWrapper(critic, encoder).to(self.device)
+        # fuse encoder with Critic target function
+        critic_target = copy.deepcopy(self.critic_target)
+        self.critic_target = QNetworkWrapper(
+            critic_target, encoder).to(self.device)
+        # fuse encoder with Actor function
+        critic_target = copy.deepcopy(self.critic_target)
+        self.critic_target = QNetworkWrapper(
+            critic_target, encoder).to(self.device)
+        # Initialize target network with same Q-network parameters
+        tau_value = copy.deepcopy(self.tau)
+        self.tau = 1.
+        self.update_critic_target()
+        self.tau = tau_value
+        # share autoencoder weights
+        self.q_network.encoder.copy_weights_from(self.models[0].encoder[0])
+        self.actor.encoder.copy_weights_from(self.q_network.encoder)
+        # Initialize optimization function
+        actor_lr = self.actor_optimizer.param_groups[0]['lr']
+        self.actor_optimizer = torch.optim.AdamW(
+            self.actor.parameters(), lr=actor_lr, amsgrad=True)
+
+        critic_lr = self.critic_optimizer.param_groups[0]['lr']
+        self.critic_optimizer = torch.optim.AdamW(
+            self.critic.parameters(), lr=critic_lr, amsgrad=True)
 
     def action_inference(self, obs, sample=False):
         obs = self.compute_z(obs).detach()
         return super().action_inference(obs, sample=sample)
-    
-    def update_critic(self, discount, obs, action, reward, next_obs, not_done, weight=None):
-        obs = self.compute_z(obs)
-        next_obs = self.compute_z(next_obs)
-        return super().update_critic(discount, obs, action, reward, next_obs, not_done, weight)
 
-    def update_critic_target(self):
-        super().update_critic_target()
-        for m in self.models:
-            if m.type == 'atc':
-                m.update_momentum_encoder(self.encoder_tau)
+    def compute_critic_loss(self, sampled_data, discount, weight=None):
+        obs, action, reward, next_obs, done = sampled_data
+        state = self.compute_z(obs)
+        next_state = self.compute_z(next_obs)
+        return super().compute_critic_loss([state, action, reward, next_state, done], discount, weight), state
+
+    # def update_critic_target(self):
+    #     super().update_critic_target()
+    #     for m in self.models:
+    #         if m.type == 'atc':
+    #             m.update_momentum_encoder(self.encoder_tau)
 
     def update_actor_and_alpha(self, obs, weight=None):
         # detach encoder, so we don't update it with the actor loss
@@ -127,13 +135,23 @@ class SRLSACAgent(SACAgent, SRLAgent):
                           discount_factor, memory_buffer, batch_size)
         SRLAgent.__init__(self, ae_models, reconstruct_freq=reconstruct_freq,
                           srl_loss=srl_loss, priors=priors, encoder_only=encoder_only)
+    
+    def update_critic(self, sampled_data, weight=None):
+        critic_loss, z = self.approximator.compute_critic_loss(
+            sampled_data, self.discount_factor, weight=weight)
+
+        z_l2 = latent_l2(z)
+        loss_z = 0.1 * z_l2
+        summary_scalar('Loss/Encoder/Critic/L2', z_l2.item())
+
+        self.approximator.update_critic(critic_loss + z_l2)
 
     def update(self, step):
         SACAgent.update(self, step)
         SRLAgent.update(self, step)
 
     def save(self, path, encoder_only=False):
-        SRLAgent.save(self, path, encoder_only)
+        self.approximator.save(path, self.ae_models, encoder_only)
 
-    def load(self, path, eval_only=True, encoder_only=False):
-        SRLAgent.load(self, path, eval_only, encoder_only)
+    def load(self, path, encoder_only=False, eval_only=True):
+        self.approximator.load(path, self.ae_models, encoder_only, eval_only)
