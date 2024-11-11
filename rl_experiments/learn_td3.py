@@ -94,7 +94,7 @@ if __name__ == '__main__':
 
     # Append SRL models
     approximator_params = dict(
-        latent_dim=args.latent_dim,
+        latent_dim=(args.latent_dim,),
         action_shape=env_params['action_shape'],
         obs_space=env.observation_space,
         max_action=env.action_space.high,
@@ -115,7 +115,7 @@ if __name__ == '__main__':
         q_approximator = SRLTD3Function
         ae_models = args2ae_model(args, env_params)
         # approximator_params['encoder_tau'] = args.encoder_tau
-        approximator_params['latent_dim'] *= len(ae_models)
+        approximator_params['latent_dim'] = (args.latent_dim * len(ae_models),)
         agent_params['ae_models'] = ae_models
         agent_params['reconstruct_freq'] = args.reconstruct_frequency
         agent_params['srl_loss'] = args.use_srl_loss
@@ -129,7 +129,7 @@ if __name__ == '__main__':
                 state_shape=env_params['state_shape'],
                 action_shape=agent_params['action_shape'])
         else:
-            approximator_params['latent_dim'] = env_params['state_shape'][-1]
+            approximator_params['latent_dim'] = env_params['state_shape']
     agent_params.update(
         dict(approximator=q_approximator(**approximator_params)))
 

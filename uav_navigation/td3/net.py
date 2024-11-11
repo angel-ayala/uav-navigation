@@ -9,25 +9,8 @@ Created on Fri Nov  8 13:06:16 2024
 import torch
 import torch.nn as nn
 
-from uav_navigation.net import MLP
-
-
-class Conv1dMLP(MLP):
-    def __init__(self, state_shape, action_dim, hidden_dim, num_layers=2):
-        super(Conv1dMLP, self).__init__(
-            state_shape[-1], action_dim, hidden_dim, num_layers=num_layers)
-        if len(state_shape) == 2:
-            self.h_layers[0] = nn.Conv1d(state_shape[0], hidden_dim,
-                                         kernel_size=state_shape[-1])
-
-    def forward(self, obs):
-        h = obs
-        for hidden_layer in self.h_layers[:-1]:
-            h = torch.relu(hidden_layer(h))
-            if isinstance(hidden_layer, nn.Conv1d):
-                h = h.squeeze(2)
-
-        return self.h_layers[-1](h)
+from uav_navigation.net import Conv1dMLP
+from uav_navigation.net import weight_init
 
 
 class Actor(Conv1dMLP):
@@ -37,6 +20,7 @@ class Actor(Conv1dMLP):
             state_dim, action_dim, hidden_dim, num_layers=2)
 
         self.max_action = max_action
+        self.apply(weight_init)
 
     def forward(self, state):
         a = super().forward(state)
@@ -57,6 +41,7 @@ class Critic(nn.Module):
         # Q2 architecture
         self.q2_network = Conv1dMLP(state_action_dim, 1, hidden_dim,
                                     num_layers=2)
+        self.apply(weight_init)
 
     def forward(self, state, action):
         if state.dim() == 3:

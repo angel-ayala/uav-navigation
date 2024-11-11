@@ -49,26 +49,39 @@ class MLP(nn.Module):
         return h
 
 
-class QNetwork(MLP):
-    def __init__(self, state_shape, action_shape, hidden_dim, num_layers=2):
-        super(QNetwork, self).__init__(
-            state_shape[-1], action_shape[-1], hidden_dim, num_layers)
+class Conv1dMLP(MLP):
+    def __init__(self, state_shape, out_dim, hidden_dim, num_layers=2):
+        super(Conv1dMLP, self).__init__(
+            state_shape[-1], out_dim, hidden_dim, num_layers=num_layers)
         if len(state_shape) == 2:
             self.h_layers[0] = nn.Conv1d(state_shape[0], hidden_dim,
                                          kernel_size=state_shape[-1])
+
+    def forward_h(self, obs):
+        h = obs
+        for hidden_layer in self.h_layers[:-1]:
+            h = torch.relu(hidden_layer(h))
+            if isinstance(hidden_layer, nn.Conv1d):
+                h = h.squeeze(2)
+        return h
+
+    def forward(self, obs):
+        h = self.forward_h(obs)
+        return self.h_layers[-1](h)
+
+
+class QNetwork(Conv1dMLP):
+    def __init__(self, state_shape, action_shape, hidden_dim, num_layers=2):
+        super(QNetwork, self).__init__(
+            state_shape, action_shape[-1], hidden_dim, num_layers)
+
         self.drop = nn.Dropout(p=0.5)
         self.apply(weight_init)
 
     def forward(self, obs):
-        z = obs
-        for hidden_layer in self.h_layers[:-1]:
-            z = torch.relu(hidden_layer(z))
-            if isinstance(hidden_layer, nn.Conv1d):
-                z = z.squeeze(2)
-
+        z = self.forward_h(obs)
         z = self.drop(z)
-        q = self.h_layers[-1](z)
-        return q
+        return self.h_layers[-1](z)
 
 
 class QFeaturesNetwork(nn.Module):

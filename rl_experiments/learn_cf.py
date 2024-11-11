@@ -248,6 +248,12 @@ def instance_env(args, name='webots_drone:webots_drone/DroneEnvDiscrete-v0',
             del env_params['is_multimodal']
         if 'target_pos' in env_params.keys():
             del env_params['target_pos']
+        if 'vector_shape' in env_params.keys():
+            del env_params['vector_shape']
+        if 'image_shape' in env_params.keys():
+            del env_params['image_shape']
+        if 'obs_space' in env_params.keys():
+            del env_params['obs_space']
     else:
         env_params = dict(
             time_limit_seconds=args.time_limit,

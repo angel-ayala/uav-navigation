@@ -13,6 +13,7 @@ from torch import nn
 from torch import optim
 from adabelief_pytorch import AdaBelief
 
+from uav_navigation.net import Conv1dMLP
 from uav_navigation.net import MLP
 
 
@@ -84,32 +85,20 @@ class QNetworkWrapper(nn.Module):
         return q
 
 
-class VectorEncoder(MLP):
+class VectorEncoder(Conv1dMLP):
     def __init__(self, state_shape, latent_dim, hidden_dim, num_layers=2):
         super(VectorEncoder, self).__init__(
-            state_shape[-1], latent_dim, hidden_dim, num_layers=num_layers)
-        if len(state_shape) == 2:
-            self.h_layers[0] = nn.Conv1d(state_shape[0], hidden_dim,
-                                         kernel_size=state_shape[-1])
+            state_shape, latent_dim, hidden_dim, num_layers=num_layers)
         self.feature_dim = latent_dim
         self.fc = nn.Linear(latent_dim, latent_dim)
         self.ln = nn.LayerNorm(self.feature_dim)
 
-    def forward_z(self, obs):
-        z = obs
-        for hidden_layer in self.h_layers:
-            z = torch.relu(hidden_layer(z))
-            if isinstance(hidden_layer, nn.Conv1d):
-                z = z.squeeze(2)
-        return z
-
     def forward(self, obs, detach=False):
-        z = self.forward_z(obs)
+        z = torch.relu(super().forward(obs))
         if detach:
             z.detach()
-        out = self.fc(z)
-        out = torch.tanh(self.ln(out))
-        return out
+        out = self.ln(self.fc(z))
+        return torch.tanh(out)
 
     def copy_weights_from(self, source):
         """Tie hidden layers"""

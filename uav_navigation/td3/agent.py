@@ -77,7 +77,6 @@ class TD3Function(GenericFunction):
                            tau=self.tau)
 
     def compute_critic_loss(self, sampled_data, discount, weight=None):
-
         # Sample replay buffer
         state, action, reward, next_state, done = sampled_data
 
@@ -164,17 +163,19 @@ class TD3Agent(GenericAgent):
                  action_shape,
                  approximator,
                  discount_factor=0.99,
+                 expl_noise=0.1,
                  memory_buffer=None,
                  batch_size=128):
         super(TD3Agent, self).__init__(action_shape, approximator,
                                        discount_factor, memory_buffer, batch_size)
+        self.expl_noise = expl_noise
         if self.is_prioritized:
             self.memory.update_beta(0)
 
-    def select_action(self, state, expl_noise=0.1):
+    def select_action(self, state):
         with torch.no_grad():
             state = self.approximator.format_obs(state).unsqueeze(0)
-            action = self.approximator.sample_action(state, expl_noise)
+            action = self.approximator.sample_action(state, self.expl_noise)
         return action
     
     def update_critic(self, sampled_data, weight=None):
