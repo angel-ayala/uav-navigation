@@ -58,7 +58,7 @@ class SACFunction(GenericFunction):
                              ).to(self.device)
         self.critic_target = Critic(latent_dim, action_shape[-1], hidden_dim
                                     ).to(self.device)
-        # Initialize target network with Critic parameters
+        # Initialize target Critic network parameters
         self.critic_target.load_state_dict(self.critic.state_dict())
 
         # Temperature
@@ -68,22 +68,18 @@ class SACFunction(GenericFunction):
         self.adjust_temperature = adjust_temperature
 
         # optimizers
-        self.actor_optimizer = torch.optim.Adam(
-            self.actor.parameters(), lr=actor_lr, betas=actor_betas)
-
-        self.critic_optimizer = torch.optim.Adam(
-            self.critic.parameters(), lr=critic_lr, betas=critic_betas)
-
-        self.log_alpha_optimizer = torch.optim.Adam(
-            [self.log_alpha], lr=alpha_lr, betas=alpha_betas)
-        # self.actor_optimizer = torch.optim.AdamW(
-        #     self.actor.parameters(), lr=actor_lr, amsgrad=True)
-
-        # self.critic_optimizer = torch.optim.AdamW(
-        #     self.critic.parameters(), lr=critic_lr, amsgrad=True)
-
-        # self.log_alpha_optimizer = torch.optim.AdamW(
-        #     [self.log_alpha], lr=alpha_lr, amsgrad=True)
+        # self.actor_optimizer = torch.optim.Adam(
+        #     self.actor.parameters(), lr=actor_lr, betas=actor_betas)
+        # self.critic_optimizer = torch.optim.Adam(
+        #     self.critic.parameters(), lr=critic_lr, betas=critic_betas)
+        # self.log_alpha_optimizer = torch.optim.Adam(
+        #     [self.log_alpha], lr=alpha_lr, betas=alpha_betas)
+        self.actor_optimizer = torch.optim.AdamW(
+            self.actor.parameters(), lr=actor_lr, amsgrad=True)
+        self.critic_optimizer = torch.optim.AdamW(
+            self.critic.parameters(), lr=critic_lr, amsgrad=True)
+        self.log_alpha_optimizer = torch.optim.AdamW(
+            [self.log_alpha], lr=alpha_lr, amsgrad=True)
 
     @property
     def alpha(self):
