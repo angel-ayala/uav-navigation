@@ -14,24 +14,6 @@ from uav_navigation.net import weight_init
 from uav_navigation.net import Conv1dMLP
 
 
-def gaussian_logprob(noise, log_std):
-    """Compute Gaussian log probability."""
-    residual = (-0.5 * noise.pow(2) - log_std).sum(-1, keepdim=True)
-    return residual - 0.5 * np.log(2 * np.pi) * noise.size(-1)
-
-
-def squash(mu, pi, log_pi):
-    """Apply squashing function.
-    See appendix C from https://arxiv.org/pdf/1812.05905.pdf.
-    """
-    mu = torch.tanh(mu)
-    if pi is not None:
-        pi = torch.tanh(pi)
-    if log_pi is not None:
-        log_pi -= torch.log(F.relu(1 - pi.pow(2)) + 1e-6).sum(-1, keepdim=True)
-    return mu, pi, log_pi
-
-
 class TanhTransform(pyd.transforms.Transform):
     domain = pyd.constraints.real
     codomain = pyd.constraints.interval(-1.0, 1.0)

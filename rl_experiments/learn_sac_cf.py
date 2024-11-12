@@ -13,14 +13,13 @@ import argparse
 import datetime
 from pathlib import Path
 
-from uav_navigation.sac.agent import SACAgent, ACFunction
+from uav_navigation.sac.agent import SACAgent, SACFunction
 from uav_navigation.sac.srl import SRLSACAgent, SRLSACFunction
 from uav_navigation.net import QFeaturesNetwork
 from uav_navigation.memory import ReplayBuffer, PrioritizedReplayBuffer
 from uav_navigation.utils import save_dict_json, run_agent
 
 from webots_drone.data import StoreStepData
-from webots_drone.envs.preprocessor import ReducedActionSpace
 
 
 from learn_cf import parse_environment_args
@@ -36,17 +35,14 @@ from learn_cf import args2priors
 
 def parse_agent_args(parser):
     arg_agent = parser.add_argument_group('Agent')
-    arg_agent.add_argument("--critic-lr", type=float, default=1e-3,
+    arg_agent.add_argument("--critic-lr", type=float, default=3e-4,
                            help='Critic function Adam learning rate.')
-    arg_agent.add_argument("--critic-beta", type=float, default=0.9,
-                           help='Q approximation function Adam \beta.')
-    arg_agent.add_argument("--critic-tau", type=float, default=0.995,
+    arg_agent.add_argument("--actor-lr", type=float, default=3e-4,
+                           help='Actor function Adam learning rate.')
+    arg_agent.add_argument("--critic-tau", type=float, default=0.005,
                            help='Soft target update \tau.')
     arg_agent.add_argument("--discount-factor", type=float, default=0.99,
                            help='Discount factor \gamma.')
-    arg_agent.add_argument("--approximator-momentum", type=float, default=.9,
-                           help='Momentum factor factor for the SGD using'
-                           'using nesterov')
     arg_agent.add_argument("--actor-freq", type=int, default=1,
                            help='Steps interval for actor batch training.')
     arg_agent.add_argument("--critic-target-freq", type=int, default=2,
@@ -76,7 +72,6 @@ if __name__ == '__main__':
     # Environment
     environment_name = 'webots_drone:webots_drone/CrazyflieEnvContinuous-v0'
     env, env_params = instance_env(args, environment_name, seed=args.seed)
-    # env = ReducedActionSpace(env)
     # Observation preprocessing
     env, env_params = wrap_env(env, env_params)
 
@@ -98,17 +93,16 @@ if __name__ == '__main__':
         obs_space=env.observation_space,
         hidden_dim=args.hidden_dim,
         init_temperature=0.1,
-        alpha_lr=1e-3,
-        alpha_beta=0.9,
-        actor_lr=1e-3,
-        actor_beta=0.9,
-        actor_min_a=env.action_space.low,
-        actor_max_a=env.action_space.high,
-        actor_log_std_min=-10,
-        actor_log_std_max=2,
+        action_range=[env.action_space.low, env.action_space.high],
+        adjust_temperature=True,
+        alpha_lr=1e-4,
+        alpha_betas=(0.9, 0.999),
+        actor_lr=args.actor_lr,
+        actor_betas=(0.9, 0.999),
+        actor_log_std_bounds=[-5., 2.],
         actor_update_freq=args.actor_freq,
         critic_lr=args.critic_lr,
-        critic_beta=args.critic_beta,
+        critic_betas=(0.9, 0.999),
         critic_tau=args.critic_tau, # 0.005,
         critic_target_update_freq=args.critic_target_freq,
         use_cuda=args.use_cuda,
@@ -129,7 +123,7 @@ if __name__ == '__main__':
         agent_params['priors'] = args2priors(args, env_params)
     else:
         agent_class = SACAgent
-        policy = ACFunction
+        policy = SACFunction
         if args.is_pixels:
             approximator_params['preprocess'] = QFeaturesNetwork(
                 env_params['state_shape'], env_params['action_shape'], only_cnn=True)

@@ -4,37 +4,34 @@
 Created on Mon Nov 27 18:27:24 2023
 
 @author: Angel Ayala
-Based on:
-"Improving Sample Efficiency in Model-Free Reinforcement Learning from Images"
-https://arxiv.org/abs/1910.01741
 """
 import torch
 import copy
+
 from uav_navigation.srl.agent import SRLAgent
 from uav_navigation.srl.agent import SRLFunction
 from uav_navigation.srl.autoencoder import latent_l2
 from uav_navigation.srl.net import QNetworkWrapper
 from uav_navigation.logger import summary_scalar
 
-from .agent import ACFunction
 from .agent import SACAgent
+from .agent import SACFunction
 
 
-class SRLSACFunction(ACFunction, SRLFunction):
-    def __init__(self, latent_dim, action_shape, obs_space,       
+class SRLSACFunction(SACFunction, SRLFunction):
+    def __init__(self, latent_dim, action_shape, obs_space,
                  hidden_dim=256,
-                 init_temperature=0.01,
-                 alpha_lr=1e-3,
-                 alpha_beta=0.9,
-                 actor_lr=1e-3,
-                 actor_beta=0.9,
-                 actor_min_a=0.,
-                 actor_max_a=1.,
-                 actor_log_std_min=-10,
-                 actor_log_std_max=2,
-                 actor_update_freq=2,
-                 critic_lr=1e-3,
-                 critic_beta=0.9,
+                 action_range=[0., 1.],
+                 init_temperature=0.1,
+                 adjust_temperature=True,
+                 alpha_lr=1e-4,
+                 alpha_betas=(0.9, 0.999),
+                 actor_lr=1e-4,
+                 actor_betas=(0.9, 0.999),
+                 actor_log_std_bounds=[-5., 2.],
+                 actor_update_freq=1,
+                 critic_lr=1e-4,
+                 critic_betas=(0.9, 0.999),
                  critic_tau=0.005,
                  critic_target_update_freq=2,
                  use_cuda=True,
@@ -43,26 +40,27 @@ class SRLSACFunction(ACFunction, SRLFunction):
                  use_augmentation=True,
                  encoder_tau=0.995,
                  decoder_latent_lambda=1e-6,):
-        ACFunction.__init__(self, latent_dim, action_shape, obs_space,
-                            hidden_dim,
-                            init_temperature,
-                            alpha_lr,
-                            alpha_beta,
-                            actor_lr,
-                            actor_beta,
-                            actor_min_a,
-                            actor_max_a,
-                            actor_log_std_min,
-                            actor_log_std_max,
-                            actor_update_freq,
-                            critic_lr,
-                            critic_beta,
-                            critic_tau,
-                            critic_target_update_freq,
-                            use_cuda,
-                            is_pixels,
-                            is_multimodal,
-                            use_augmentation)
+        SACFunction.__init__(self, latent_dim=latent_dim,
+                             action_shape=action_shape, obs_space=obs_space,
+                             hidden_dim=hidden_dim,
+                             action_range=action_range,
+                             init_temperature=init_temperature,
+                             adjust_temperature=adjust_temperature,
+                             alpha_lr=alpha_lr,
+                             alpha_betas=alpha_betas,
+                             actor_lr=actor_lr,
+                             actor_betas=actor_betas,
+                             actor_log_std_bounds=actor_log_std_bounds,
+                             actor_update_freq=actor_update_freq,
+                             critic_lr=critic_lr,
+                             critic_betas=critic_betas,
+                             critic_tau=critic_tau,
+                             critic_target_update_freq=critic_target_update_freq,
+                             use_cuda=use_cuda,
+                             is_pixels=is_pixels,
+                             is_multimodal=is_multimodal,
+                             use_augmentation=use_augmentation,
+                             preprocess=False)
         SRLFunction.__init__(self, decoder_latent_lambda)
         self.encoder_tau = encoder_tau
     
@@ -106,23 +104,17 @@ class SRLSACFunction(ACFunction, SRLFunction):
         next_state = self.compute_z(next_obs)
         return super().compute_critic_loss([state, action, reward, next_state, done], discount, weight), state
 
-    # def update_critic_target(self):
-    #     super().update_critic_target()
-    #     for m in self.models:
-    #         if m.type == 'atc':
-    #             m.update_momentum_encoder(self.encoder_tau)
-
     def update_actor_and_alpha(self, obs, weight=None):
         # detach encoder, so we don't update it with the actor loss
         obs = self.compute_z(obs).detach()
         return super().update_actor_and_alpha(obs, weight)
 
     def save(self, path, ae_models, encoder_only=False):
-        ACFunction.save(self, path)
+        SACFunction.save(self, path)
         SRLFunction.save(self, path, ae_models, encoder_only)
 
     def load(self, path, ae_models, encoder_only=False, eval_only=False):
-        ACFunction.load(self, path, eval_only)
+        SACFunction.load(self, path, eval_only)
         SRLFunction.load(self, path, ae_models, encoder_only, eval_only)
 
 
@@ -141,7 +133,7 @@ class SRLSACAgent(SACAgent, SRLAgent):
             sampled_data, self.discount_factor, weight=weight)
 
         z_l2 = latent_l2(z)
-        loss_z = 0.1 * z_l2
+        loss_z = 0.01 * z_l2
         summary_scalar('Loss/Encoder/Critic/L2', z_l2.item())
 
         self.approximator.update_critic(critic_loss + z_l2)

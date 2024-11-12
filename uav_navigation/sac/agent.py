@@ -4,37 +4,35 @@
 Created on Sun Nov 26 15:49:43 2023
 
 @author: Angel Ayala
+Code taken from: https://github.com/denisyarats/pytorch_sac
 """
 import numpy as np
 import torch
-# import torch.nn as nn
-# import torch.optim as optim
 from torch.nn import functional as F
-from ..agent import GenericAgent
-from ..agent import GenericFunction
-from ..utils import soft_update_params
-# from ..utils import obs2tensor
-# from ..memory import is_prioritized_memory
-from ..logger import summary_scalar
+
+from uav_navigation.agent import GenericAgent
+from uav_navigation.agent import GenericFunction
+from uav_navigation.utils import soft_update_params
+from uav_navigation.logger import summary_scalar
+
 from .net import DiagGaussianActor
 from .net import Critic
 
 
-class ACFunction(GenericFunction):
+class SACFunction(GenericFunction):
     def __init__(self, latent_dim, action_shape, obs_space,
                  hidden_dim=256,
-                 init_temperature=0.01,
-                 alpha_lr=1e-3,
-                 alpha_beta=0.9,
-                 actor_lr=1e-3,
-                 actor_beta=0.9,
-                 actor_min_a=0.,
-                 actor_max_a=1.,
-                 actor_log_std_min=-10,
-                 actor_log_std_max=2,
-                 actor_update_freq=2,
-                 critic_lr=1e-3,
-                 critic_beta=0.9,
+                 action_range=[0., 1.],
+                 init_temperature=0.1,
+                 adjust_temperature=True,
+                 alpha_lr=1e-4,
+                 alpha_betas=(0.9, 0.999),
+                 actor_lr=1e-4,
+                 actor_betas=(0.9, 0.999),
+                 actor_log_std_bounds=[-5., 2.],
+                 actor_update_freq=1,
+                 critic_lr=1e-4,
+                 critic_betas=(0.9, 0.999),
                  critic_tau=0.005,
                  critic_target_update_freq=2,
                  use_cuda=True,
@@ -43,68 +41,62 @@ class ACFunction(GenericFunction):
                  use_augmentation=True,
                  preprocess=False):
 
-        super(ACFunction, self).__init__(obs_space, use_cuda, is_pixels,
-                                         is_multimodal, use_augmentation)
+        super(SACFunction, self).__init__(obs_space, use_cuda, is_pixels,
+                                          is_multimodal, use_augmentation)
 
-        self.critic_tau = critic_tau
+        # self.preprocess = preproces
+        # Actor 
         self.actor_update_freq = actor_update_freq
-        self.critic_target_update_freq = critic_target_update_freq
-
-        # Q-networks
         self.actor = DiagGaussianActor(latent_dim, action_shape[-1], hidden_dim,
-                                       log_std_bounds=[actor_log_std_min, actor_log_std_max]).to(self.device)
-        self.action_range = torch.tensor(actor_min_a), torch.tensor(actor_max_a)
+                                       log_std_bounds=actor_log_std_bounds).to(self.device)
+        self.action_range = torch.tensor(action_range, device=self.device)
 
-        self.preprocess = preprocess
-        self.critic = Critic(latent_dim, action_shape[-1], hidden_dim).to(self.device)
-        self.critic_target = Critic(latent_dim, action_shape[-1], hidden_dim).to(self.device)
-
-        # Initialize target network with Q-network parameters
+        # Critic
+        self.critic_tau = critic_tau
+        self.critic_target_update_freq = critic_target_update_freq
+        self.critic = Critic(latent_dim, action_shape[-1], hidden_dim
+                             ).to(self.device)
+        self.critic_target = Critic(latent_dim, action_shape[-1], hidden_dim
+                                    ).to(self.device)
+        # Initialize target network with Critic parameters
         self.critic_target.load_state_dict(self.critic.state_dict())
 
-        self.log_alpha = torch.zeros(1, dtype=torch.float32, device=self.device, requires_grad=True)
-        # self.log_alpha.requires_grad = True
+        # Temperature
+        self.log_alpha = torch.tensor(np.log(init_temperature), requires_grad=True).to(self.device)
         # set target entropy to -|A|
-        self.target_entropy = -np.prod(action_shape)
+        self.target_entropy = -action_shape[-1]
+        self.adjust_temperature = adjust_temperature
 
         # optimizers
-        # self.actor_optimizer = torch.optim.Adam(
-        #     self.actor.parameters(), lr=actor_lr, betas=(actor_beta, 0.999)
-        # )
+        self.actor_optimizer = torch.optim.Adam(
+            self.actor.parameters(), lr=actor_lr, betas=actor_betas)
 
-        # self.critic_optimizer = torch.optim.Adam(
-        #     self.critic.parameters(), lr=critic_lr, betas=(critic_beta, 0.999)
-        # )
+        self.critic_optimizer = torch.optim.Adam(
+            self.critic.parameters(), lr=critic_lr, betas=critic_betas)
 
-        # self.log_alpha_optimizer = torch.optim.Adam(
-        #     [self.log_alpha], lr=alpha_lr, betas=(alpha_beta, 0.999)
-        # )
-        self.actor_optimizer = torch.optim.AdamW(
-            self.actor.parameters(), lr=actor_lr, amsgrad=True)
+        self.log_alpha_optimizer = torch.optim.Adam(
+            [self.log_alpha], lr=alpha_lr, betas=alpha_betas)
+        # self.actor_optimizer = torch.optim.AdamW(
+        #     self.actor.parameters(), lr=actor_lr, amsgrad=True)
 
-        self.critic_optimizer = torch.optim.AdamW(
-            self.critic.parameters(), lr=critic_lr, amsgrad=True)
+        # self.critic_optimizer = torch.optim.AdamW(
+        #     self.critic.parameters(), lr=critic_lr, amsgrad=True)
 
-        self.log_alpha_optimizer = torch.optim.AdamW(
-            [self.log_alpha], lr=alpha_lr, amsgrad=True)
+        # self.log_alpha_optimizer = torch.optim.AdamW(
+        #     [self.log_alpha], lr=alpha_lr, amsgrad=True)
 
     @property
     def alpha(self):
         return self.log_alpha.exp()
 
-    def actor2action(self, pi):
-        action = torch.tanh(pi) * self.action_range[1]
-        return action
-
     def action_inference(self, obs, sample=False):
-        if self.preprocess:
-            obs = self.preprocess(obs)
+        # if self.preprocess:
+        #     obs = self.preprocess(obs)
         dist = self.actor(obs)
         action = dist.sample() if sample else dist.mean
-        action = self.actor2action(action)
-        action = action.cpu().clamp(*self.action_range)
+        action = action.clamp(*self.action_range)
         assert action.ndim == 2 and action.shape[0] == 1
-        return action[0].detach().numpy()
+        return action[0].cpu().detach().numpy()
 
     def update_critic_target(self):
         # Soft update the target network
@@ -118,36 +110,35 @@ class ACFunction(GenericFunction):
         with torch.no_grad():
             dist = self.actor(next_obs)
             next_action = dist.sample()
-            log_pi = dist.log_prob(next_action).sum(-1, keepdim=True)
-            next_action = self.actor2action(next_action)
-            # print('log_pi', log_pi.shape)
-            # print('next_action', next_action.min(), next_action.max())
+            log_prob = dist.log_prob(next_action).sum(-1, keepdim=True)
             target_Q1, target_Q2 = self.critic_target(next_obs, next_action)
-            target_V = torch.min(target_Q1, target_Q2) - self.alpha * log_pi
-            target_Q = reward.unsqueeze(1) + discount * target_V * (1 - done).unsqueeze(1)
+            target_V = torch.min(target_Q1, target_Q2) - self.alpha.detach() * log_prob
+            target_Q = reward.unsqueeze(1) + ((1 - done).unsqueeze(1) * discount * target_V)
+            # target_Q = target_Q.detach()
+
 
         # get current Q estimates
         current_Q1, current_Q2 = self.critic(obs, action)
-        if weight is not None:
-            td_error = (F.mse_loss(current_Q1, target_Q, reduction='none') +
-                        F.mse_loss(current_Q2, target_Q, reduction='none'))
-            # print('q_loss', q_loss.shape)
-            # td_error = (current_Q1 - target_Q) + (current_Q2 - target_Q)
-            print('td_error', td_error.shape)
-            print('weight', weight.shape)
-            # q_loss = td_error.pow(2) * weight
-            q_loss = td_error * weight
-            print('q_loss', q_loss.shape)
-            # critic_loss = (weight * q_loss.squeeze()).mean()
-            # q_loss = td_error[0].pow(2) * weight
-            critic_loss = 0.5 * q_loss.mean()#.squeeze()
-            print('critic_loss', critic_loss.shape)
-            td_error = (td_error / 2.).detach()
-            print('td_error', td_error.shape)
-        else:
-            critic_loss = (F.mse_loss(current_Q1, target_Q) +
-                           F.mse_loss(current_Q2, target_Q))
-            td_error = None
+        # if weight is not None:
+        #     td_error = (F.mse_loss(current_Q1, target_Q, reduction='none') +
+        #                 F.mse_loss(current_Q2, target_Q, reduction='none'))
+        #     # print('q_loss', q_loss.shape)
+        #     # td_error = (current_Q1 - target_Q) + (current_Q2 - target_Q)
+        #     print('td_error', td_error.shape)
+        #     print('weight', weight.shape)
+        #     # q_loss = td_error.pow(2) * weight
+        #     q_loss = td_error * weight
+        #     print('q_loss', q_loss.shape)
+        #     # critic_loss = (weight * q_loss.squeeze()).mean()
+        #     # q_loss = td_error[0].pow(2) * weight
+        #     critic_loss = 0.5 * q_loss.mean()#.squeeze()
+        #     print('critic_loss', critic_loss.shape)
+        #     td_error = (td_error / 2.).detach()
+        #     print('td_error', td_error.shape)
+        # else:
+        critic_loss = (F.mse_loss(current_Q1, target_Q) +
+                       F.mse_loss(current_Q2, target_Q))
+            # td_error = None
         summary_scalar('Loss/Critic', critic_loss.item())
 
         return critic_loss
@@ -160,36 +151,27 @@ class ACFunction(GenericFunction):
 
     def update_actor_and_alpha(self, obs, weight=None):
         # detach encoder, so we don't update it with the actor loss
-        if self.preprocess:
-            dist = self.actor(self.preprocess(obs))
-        else:
-            dist = self.actor(obs)
-        pi = dist.rsample()
-        log_pi = dist.log_prob(pi).sum(-1, keepdim=True)
-        pi = self.actor2action(pi)
-        actor_Q1, actor_Q2 = self.critic(obs, pi)
+        dist = self.actor(obs)
+        action = dist.rsample()
+        log_prob = dist.log_prob(action).sum(-1, keepdim=True)
+        actor_Q1, actor_Q2 = self.critic(obs, action)
+        actor_Q = torch.min(actor_Q1, actor_Q2)
+        actor_loss = (self.alpha.detach() * log_prob - actor_Q).mean()
 
-        entropy = -log_pi.mean()
-        summary_scalar('Loss/Entropy', entropy.item())
-
-        actor_Q = torch.min(actor_Q1, actor_Q2).detach()
-        actor_loss = self.alpha.detach() * log_pi - actor_Q
-        if weight is not None:
-            actor_loss = actor_loss.squeeze() * weight
-        actor_loss = actor_loss.mean()
         summary_scalar('Loss/Actor', actor_loss.item())
+        summary_scalar('Loss/TargetEntropy', self.target_entropy)
+        summary_scalar('Loss/Entropy', -log_prob.mean().item())
 
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
         self.actor_optimizer.step()
-
-        alpha_loss = - (self.alpha * (log_pi.detach() + self.target_entropy)
-                        ).mean()
-        summary_scalar('Loss/Alpha', alpha_loss.item())
-
-        self.log_alpha_optimizer.zero_grad()
-        alpha_loss.backward()
-        self.log_alpha_optimizer.step()
+        
+        if self.adjust_temperature:
+            self.log_alpha_optimizer.zero_grad()
+            alpha_loss = (self.alpha * (-log_prob - self.target_entropy).detach()).mean()
+            summary_scalar('Loss/Alpha', alpha_loss.item())
+            alpha_loss.backward()
+            self.log_alpha_optimizer.step()
 
     def save(self, path):
         ac_app_path = str(path) + "_actor_critic.pth"
@@ -201,8 +183,8 @@ class ACFunction(GenericFunction):
             'critic_optimizer_state_dict': self.critic_optimizer.state_dict(),
             'log_alpha_optimizer_state_dict': self.log_alpha_optimizer.state_dict()
             }
-        if self.preprocess:
-            model_chkpt['preprocess_dict'] = self.preprocess.state_dict()
+        # if self.preprocess:
+        #     model_chkpt['preprocess_dict'] = self.preprocess.state_dict()
         torch.save(model_chkpt, ac_app_path)
 
     def load(self, path, eval_only=True):
@@ -211,8 +193,8 @@ class ACFunction(GenericFunction):
         self.actor.load_state_dict(checkpoint['actor_state_dict'])
         self.critic.load_state_dict(checkpoint['critic_state_dict'])
         self.critic_target.load_state_dict(checkpoint['critic_target_state_dict'])
-        if 'preprocess_dict' in checkpoint.keys():
-            self.preprocess.load_state_dict(checkpoint['preprocess_dict'])
+        # if 'preprocess_dict' in checkpoint.keys():
+        #     self.preprocess.load_state_dict(checkpoint['preprocess_dict'])
 
         if not eval_only:
             self.actor_optimizer.load_state_dict(checkpoint['actor_optimizer_state_dict'])
