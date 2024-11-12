@@ -11,7 +11,6 @@ Code taken from: https://github.com/sfujim/TD3/blob/master/TD3.py
 import copy
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 
 from uav_navigation.agent import GenericAgent
@@ -27,17 +26,28 @@ from .net import Critic
 # Paper: https://arxiv.org/abs/1802.09477
 class TD3Function(GenericFunction):
 
-    def __init__(self, latent_dim, action_shape, obs_space, max_action,
-                 hidden_dim=256, actor_lr=3e-4, critic_lr=3e-4, tau=0.005,
-                 policy_noise=0.2, noise_clip=0.5, policy_freq=2,
-                 use_cuda=True, is_pixels=False, is_multimodal=False,
+    def __init__(self, latent_dim, action_shape, obs_space,
+                 hidden_dim=256,
+                 action_range=[0., 1.],
+                 actor_lr=3e-4,
+                 critic_lr=3e-4,
+                 tau=0.005,
+                 policy_noise=0.2,
+                 noise_clip=0.5,
+                 policy_freq=2,
+                 use_cuda=True,
+                 is_pixels=False,
+                 is_multimodal=False,
                  use_augmentation=True):
-        super(TD3Function, self).__init__(obs_space, use_cuda,
-                                          is_pixels, is_multimodal, use_augmentation)
-        self.max_action = torch.tensor(max_action, device=self.device)
-        self.actor = Actor(latent_dim, action_shape[-1], self.max_action,
+        super(TD3Function, self).__init__(obs_space, use_cuda, is_pixels,
+                                          is_multimodal, use_augmentation)
+        # Actor
+        self.action_range = torch.tensor(action_range, device=self.device)
+        self.actor = Actor(latent_dim, action_shape[-1], self.action_range[1],
                            hidden_dim).to(self.device)
         self.actor_target = copy.deepcopy(self.actor)
+        
+        # Critic
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(),
                                                 lr=actor_lr)
 
@@ -49,9 +59,9 @@ class TD3Function(GenericFunction):
 
         self.tau = tau
         self.policy_noise = torch.tensor(policy_noise, device=self.device)
-        self.policy_noise *= self.max_action
+        self.policy_noise *= self.action_range[1]
         self.noise_clip = torch.tensor(noise_clip, device=self.device)
-        self.noise_clip *= self.max_action
+        self.noise_clip *= self.action_range[1]
         self.policy_freq = policy_freq
 
     def action_inference(self, obs):
@@ -59,10 +69,10 @@ class TD3Function(GenericFunction):
 
     def sample_action(self, obs, expl_noise=0.1):
         # TODO: evaluation should have expl_noise=0
-        max_action = self.max_action.cpu().numpy()
-        action_noise = np.random.normal(0, max_action * expl_noise)
+        max_action = self.action_range.cpu().numpy()
+        action_noise = np.random.normal(0, max_action[1] * expl_noise)
         action = self.action_inference(obs) + action_noise
-        return action.clip(-max_action, max_action)
+        return action.clip(*max_action)
 
     def update_actor_target(self):
         # Soft update the target network
@@ -82,13 +92,11 @@ class TD3Function(GenericFunction):
 
         with torch.no_grad():
             # Select action according to policy and add clipped noise
-            noise = (
-                torch.randn_like(action) * self.policy_noise
-            ).clamp(-self.noise_clip, self.noise_clip)
+            noise = (torch.randn_like(action) * self.policy_noise
+                     ).clamp(-self.noise_clip, self.noise_clip)
 
-            next_action = (
-                self.actor_target(next_state) + noise
-            ).clamp(-self.max_action, self.max_action)
+            next_action = (self.actor_target(next_state) + noise
+                           ).clamp(*self.action_range)
 
             # Compute the target Q value
             target_Q1, target_Q2 = self.critic_target(next_state, next_action)

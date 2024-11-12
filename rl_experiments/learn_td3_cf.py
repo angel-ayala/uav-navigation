@@ -88,15 +88,14 @@ if __name__ == '__main__':
     if args.is_vector or not args.is_pixels:
         print('uav_data', env_params['uav_data'])
     print('action_shape', agent_params['action_shape'])
-    print('max_action', env.action_space.high)
 
     # Append SRL models
     approximator_params = dict(
         latent_dim=(args.latent_dim,),
         action_shape=env_params['action_shape'],
         obs_space=env.observation_space,
-        max_action=env.action_space.high,
         hidden_dim=args.hidden_dim,
+        action_range=[env.action_space.low, env.action_space.high],
         actor_lr=args.actor_lr,
         critic_lr=args.critic_lr,
         tau=args.tau,  # 0.005,
@@ -107,6 +106,7 @@ if __name__ == '__main__':
         is_pixels=args.is_pixels,
         is_multimodal=env_params['is_multimodal'],
         use_augmentation=False)
+    print('max_action', approximator_params['action_range'])
 
     if args.is_srl:
         agent_class = SRLTD3Agent

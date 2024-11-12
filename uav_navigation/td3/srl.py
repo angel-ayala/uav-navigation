@@ -14,13 +14,22 @@ from uav_navigation.logger import summary_scalar
 
 
 class SRLTD3Function(TD3Function, SRLFunction):
-    def __init__(self, latent_dim, action_shape, obs_space, max_action,
-                 hidden_dim=256, actor_lr=3e-4, critic_lr=3e-4, tau=0.005,
-                 policy_noise=0.2, noise_clip=0.5, policy_freq=2,
-                 use_cuda=True, is_pixels=False, is_multimodal=False,
-                 use_augmentation=True, decoder_latent_lambda=1e-6):
+    def __init__(self, latent_dim, action_shape, obs_space,
+                 hidden_dim=256,
+                 action_range=[0., 1.],
+                 actor_lr=3e-4,
+                 critic_lr=3e-4,
+                 tau=0.005,
+                 policy_noise=0.2,
+                 noise_clip=0.5,
+                 policy_freq=2,
+                 use_cuda=True,
+                 is_pixels=False,
+                 is_multimodal=False,
+                 use_augmentation=True,
+                 decoder_latent_lambda=1e-6):
         TD3Function.__init__(self, latent_dim, action_shape, obs_space,
-                             max_action=max_action,
+                             action_range=action_range,
                              hidden_dim=hidden_dim,
                              actor_lr=actor_lr,
                              critic_lr=critic_lr,
