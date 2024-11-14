@@ -52,14 +52,14 @@ class TD3Function(GenericFunction):
                              ).to(self.device)
         self.critic_target = copy.deepcopy(self.critic)
         # optimizers
-        # self.actor_optimizer = torch.optim.Adam(
-        #     self.actor.parameters(), lr=actor_lr)
-        # self.critic_optimizer = torch.optim.Adam(
-        #     self.critic.parameters(), lr=critic_lr)
-        self.actor_optimizer = torch.optim.AdamW(
-            self.actor.parameters(), lr=actor_lr, amsgrad=True)
-        self.critic_optimizer = torch.optim.AdamW(
-            self.critic.parameters(), lr=critic_lr, amsgrad=True)
+        self.actor_optimizer = torch.optim.Adam(
+            self.actor.parameters(), lr=actor_lr)
+        self.critic_optimizer = torch.optim.Adam(
+            self.critic.parameters(), lr=critic_lr)
+        # self.actor_optimizer = torch.optim.AdamW(
+        #     self.actor.parameters(), lr=actor_lr, amsgrad=True)
+        # self.critic_optimizer = torch.optim.AdamW(
+        #     self.critic.parameters(), lr=critic_lr, amsgrad=True)
 
         self.tau = tau
         self.policy_noise = torch.tensor(policy_noise, device=self.device)

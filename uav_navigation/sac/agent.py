@@ -62,24 +62,25 @@ class SACFunction(GenericFunction):
         self.critic_target.load_state_dict(self.critic.state_dict())
 
         # Temperature
-        self.log_alpha = torch.tensor(np.log(init_temperature), requires_grad=True).to(self.device)
+        self.log_alpha = torch.tensor(np.log(init_temperature),
+                                      requires_grad=True, device=self.device)
         # set target entropy to -|A|
         self.target_entropy = -action_shape[-1]
         self.adjust_temperature = adjust_temperature
 
         # optimizers
-        # self.actor_optimizer = torch.optim.Adam(
-        #     self.actor.parameters(), lr=actor_lr, betas=actor_betas)
-        # self.critic_optimizer = torch.optim.Adam(
-        #     self.critic.parameters(), lr=critic_lr, betas=critic_betas)
-        # self.log_alpha_optimizer = torch.optim.Adam(
-        #     [self.log_alpha], lr=alpha_lr, betas=alpha_betas)
-        self.actor_optimizer = torch.optim.AdamW(
-            self.actor.parameters(), lr=actor_lr, amsgrad=True)
-        self.critic_optimizer = torch.optim.AdamW(
-            self.critic.parameters(), lr=critic_lr, amsgrad=True)
-        self.log_alpha_optimizer = torch.optim.AdamW(
-            [self.log_alpha], lr=alpha_lr, amsgrad=True)
+        self.actor_optimizer = torch.optim.Adam(
+            self.actor.parameters(), lr=actor_lr, betas=actor_betas)
+        self.critic_optimizer = torch.optim.Adam(
+            self.critic.parameters(), lr=critic_lr, betas=critic_betas)
+        self.log_alpha_optimizer = torch.optim.Adam(
+            [self.log_alpha], lr=alpha_lr, betas=alpha_betas)
+        # self.actor_optimizer = torch.optim.AdamW(
+        #     self.actor.parameters(), lr=actor_lr, amsgrad=True)
+        # self.critic_optimizer = torch.optim.AdamW(
+        #     self.critic.parameters(), lr=critic_lr, amsgrad=True)
+        # self.log_alpha_optimizer = torch.optim.AdamW(
+        #     [self.log_alpha], lr=alpha_lr, amsgrad=True)
 
     @property
     def alpha(self):
