@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Mon Nov 27 23:45:58 2023
+Created on Mon Nov 11 23:45:58 2024
 
 @author: Angel Ayala
 """
@@ -21,7 +21,6 @@ from uav_navigation.utils import save_dict_json, run_agent
 
 from webots_drone.data import StoreStepData
 
-
 from learn_cf import parse_environment_args
 from learn_cf import parse_memory_args
 from learn_cf import parse_srl_args
@@ -30,7 +29,6 @@ from learn_cf import parse_utils_args
 from learn_cf import instance_env
 from learn_cf import wrap_env
 from learn_cf import args2ae_model
-from learn_cf import args2priors
 
 
 def parse_agent_args(parser):
@@ -54,17 +52,17 @@ def parse_args():
     # Argument parser
     parser = argparse.ArgumentParser()
 
-    arg_env = parse_environment_args(parser)
-    arg_agent = parse_agent_args(parser)
-    arg_mem = parse_memory_args(parser)
-    arg_srl = parse_srl_args(parser)
-    arg_training = parse_training_args(parser)
-    arg_utils = parse_utils_args(parser)
+    parse_environment_args(parser)
+    parse_agent_args(parser)
+    parse_memory_args(parser)
+    parse_srl_args(parser)
+    parse_training_args(parser)
+    parse_utils_args(parser)
 
     return parser.parse_args()
 
 
-if __name__ == '__main__':    
+if __name__ == '__main__':
     args = parse_args()
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
@@ -79,16 +77,16 @@ if __name__ == '__main__':
     agent_params = dict(
         action_shape=env_params['action_shape'],
         discount_factor=args.discount_factor,
+        batch_size=args.batch_size,
     )
     print('state_shape', env_params['state_shape'])
     if args.is_vector or not args.is_pixels:
         print('uav_data', env_params['uav_data'])
-    print('action_shape', env_params['action_shape'])
+    print('action_shape', agent_params['action_shape'])
 
     # Append SRL models
-    ae_models = dict()
     approximator_params = dict(
-        latent_dim=(args.latent_dim, ),
+        latent_dim=(args.latent_dim,),
         action_shape=env_params['action_shape'],
         obs_space=env.observation_space,
         hidden_dim=args.hidden_dim,
@@ -108,19 +106,18 @@ if __name__ == '__main__':
         use_cuda=args.use_cuda,
         is_pixels=args.is_pixels,
         is_multimodal=env_params['is_multimodal'],
-        use_augmentation=True)
+        use_augmentation=False)
 
     if args.is_srl:
         agent_class = SRLSACAgent
         policy = SRLSACFunction
         ae_models = args2ae_model(args, env_params)
-        approximator_params['encoder_tau'] = args.encoder_tau
+        # approximator_params['encoder_tau'] = args.encoder_tau
         approximator_params['latent_dim'] = (args.latent_dim * len(ae_models),)
         agent_params['ae_models'] = ae_models
         agent_params['encoder_only'] = args.encoder_only
         agent_params['reconstruct_freq'] = args.reconstruct_frequency
         agent_params['srl_loss'] = args.use_srl_loss
-        agent_params['priors'] = args2priors(args, env_params)
     else:
         agent_class = SACAgent
         policy = SACFunction
@@ -140,13 +137,15 @@ if __name__ == '__main__':
         action_shape=env_params['action_shape'],
         is_multimodal=env_params['is_multimodal']
     )
+    if env_params['is_multimodal']:
+        memory_params['obs_shape'] = env_params['obs_space']
     memory_class = ReplayBuffer
 
     if args.memory_prioritized:
         memory_params.update(dict(
             alpha=args.prioritized_alpha,
             beta=args.prioritized_initial_beta,
-            beta_steps=args.steps // args.critic_target_freq
+            beta_steps=args.beta_steps
         ))
         memory_class = PrioritizedReplayBuffer
 
@@ -179,7 +178,7 @@ if __name__ == '__main__':
         mem_steps=args.memory_steps,
         eval_interval=args.eval_interval,
         eval_steps=args.eval_steps,
-        eval_epsilon=False,
+        eval_epsilon=None,
         outpath=outfolder)
     # update data for log output
     run_params_save = run_params.copy()
@@ -190,6 +189,10 @@ if __name__ == '__main__':
     agent_params.update(dict(approximator=approximator_params))
     agent_params_save = agent_params.copy()
     agent_params_save.update(dict(is_srl=args.is_srl))
+
+    # environment meta info
+    env_params['target_quadrants'] = env.quadrants.tolist()
+    env_params['flight_area'] = env.flight_area.tolist()
 
     save_dict_json(env_params, outfolder / 'args_environment.json')
     save_dict_json(agent_params_save, outfolder / 'args_agent.json')

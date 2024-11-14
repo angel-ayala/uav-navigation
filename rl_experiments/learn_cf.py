@@ -58,7 +58,7 @@ def parse_environment_args(parser):
     arg_env.add_argument("--init-altitude", type=float, default=1.0,
                          help='Minimum height distance to begin the mission.')
     arg_env.add_argument("--altitude-limits", type=list_of_float,
-                         default=[0.25, 2.25], help='Vertical flight limits.')
+                         default=[0.25, 2.], help='Vertical flight limits.')
     arg_env.add_argument("--target-pos", type=int, default=None,
                          help='Cuadrant number for target position.')
     arg_env.add_argument("--target-dim", type=list_of_float, default=[0.05, 0.02],
@@ -254,6 +254,10 @@ def instance_env(args, name='webots_drone:webots_drone/DroneEnvDiscrete-v0',
             del env_params['image_shape']
         if 'obs_space' in env_params.keys():
             del env_params['obs_space']
+        if 'target_quadrants' in env_params.keys():
+            del env_params['target_quadrants']
+        if 'flight_area' in env_params.keys():
+            del env_params['flight_area']
     else:
         env_params = dict(
             time_limit_seconds=args.time_limit,
@@ -548,6 +552,10 @@ if __name__ == '__main__':
     agent_params.update(dict(approximator=approximator_params))
     agent_params_save = agent_params.copy()
     agent_params_save.update(dict(is_srl=args.is_srl))
+
+    # environment meta info
+    env_params['target_quadrants'] = env.quadrants.tolist()
+    env_params['flight_area'] = env.flight_area.tolist()
 
     save_dict_json(env_params, outfolder / 'args_environment.json')
     save_dict_json(agent_params_save, outfolder / 'args_agent.json')

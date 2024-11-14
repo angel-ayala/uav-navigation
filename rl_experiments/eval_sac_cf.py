@@ -11,9 +11,9 @@ import numpy as np
 import torch
 from pathlib import Path
 
-from uav_navigation.agent import DDQNAgent, QFunction
-from uav_navigation.net import QNetwork, QFeaturesNetwork
-from uav_navigation.srl.agent import SRLDDQNAgent, SRLQFunction
+from uav_navigation.sac.agent import SACAgent, SACFunction
+from uav_navigation.sac.srl import SRLSACAgent, SRLSACFunction
+from uav_navigation.net import QFeaturesNetwork
 from uav_navigation.utils import load_json_dict
 from uav_navigation.utils import evaluate_agent
 
@@ -29,7 +29,7 @@ from learn_cf import wrap_env
 def parse_args():
     parser = argparse.ArgumentParser()    # misc
     parser.add_argument('--logspath', type=str,
-                        default='logs/ddqn-srl_2023-11-28_00-13-33',
+                        default='logs/SAC-srl_2023-11-28_00-13-33',
                         help='Log path with training results.')
     parser.add_argument('--seed', type=int, default=666)
     parser.add_argument('--episode', type=int, default=-1,
@@ -67,12 +67,12 @@ def run_evaluation(seed_val, logpath, episode):
 
     # Define constants
     logpath = Path(logpath)
-    agent_paths = [lp.name[:12] for lp in logpath.glob('**/agent_ep_*_q*')]
+    agent_paths = [lp.name[:12] for lp in logpath.glob('**/agent_ep_*_actor*')]
     agent_paths.sort()
     episode = episode - 1
 
     # Environment args
-    environment_name = 'webots_drone:webots_drone/CrazyflieEnvDiscrete-v0'
+    environment_name = 'webots_drone:webots_drone/CrazyflieEnvContinuous-v0'
     env_params = load_json_dict(logpath / 'args_environment.json')
 
     target_pos = args.target_pos
@@ -99,22 +99,20 @@ def run_evaluation(seed_val, logpath, episode):
     del agent_params['is_srl']
     approximator_params = agent_params['approximator']
     approximator_params['obs_space'] = env.observation_space
+    approximator_params['action_range'] = [env.action_space.low, env.action_space.high]
     if is_srl:
-        agent_class = SRLDDQNAgent
-        q_approximator = SRLQFunction
-        approximator_params['q_app_fn'] = QNetwork
+        agent_class = SRLSACAgent
+        policy = SRLSACFunction
     else:
-        agent_class = DDQNAgent
-        q_approximator = QFunction
-        approximator_params['q_app_fn'] = QFeaturesNetwork\
-            if env_params['is_pixels'] else QNetwork
+        agent_class = SACAgent
+        policy = SACFunction
 
     print('state_shape', env_params['state_shape'])
     print('action_shape', agent_params['action_shape'])
 
     # Instantiate an init evaluation
     agent_params.update(
-        dict(approximator=q_approximator(**approximator_params)))
+        dict(approximator=policy(**approximator_params)))
     training_params = load_json_dict(logpath / 'args_training.json')
 
     # Video recording callback
@@ -129,6 +127,8 @@ def run_evaluation(seed_val, logpath, episode):
         print('Loading from', "/".join(str(agent_path).split("/")[-3:]))
         agent = agent_class(**agent_params)
         agent.load(logpath / agent_path)
+        agent.sample = True  # ensure exploitation
+
         store_callback = StoreStepData(
             logpath / f"history_eval_{log_ep+1:03d}.csv", n_sensors=4)
         store_callback._ep = log_ep

@@ -10,18 +10,16 @@ import torch
 import numpy as np
 import argparse
 
-import gym
 import datetime
 from pathlib import Path
 
 from uav_navigation.td3.agent import TD3Agent, TD3Function
-from uav_navigation.net import QFeaturesNetwork
 from uav_navigation.td3.srl import SRLTD3Agent, SRLTD3Function
+from uav_navigation.net import QFeaturesNetwork
 from uav_navigation.memory import ReplayBuffer, PrioritizedReplayBuffer
 from uav_navigation.utils import save_dict_json, run_agent
 
 from webots_drone.data import StoreStepData
-from webots_drone.envs.preprocessor import ReducedActionSpace
 
 from learn_cf import parse_environment_args
 from learn_cf import parse_memory_args
@@ -38,9 +36,11 @@ def parse_agent_args(parser):
     arg_agent.add_argument("--critic-lr", type=float, default=3e-4,
                            help='Critic function Adam learning rate.')
     arg_agent.add_argument("--actor-lr", type=float, default=3e-4,
-                           help='Actor function Adams learning rate.')
+                           help='Actor function Adam learning rate.')
     arg_agent.add_argument("--tau", type=float, default=0.005,
                            help='Soft target update \tau.')
+    arg_agent.add_argument("--exploration-noise", type=float, default=0.1,
+                           help='Action noise during learning.')
     arg_agent.add_argument("--discount-factor", type=float, default=0.99,
                            help='Discount factor \gamma.')
     arg_agent.add_argument("--policy-freq", type=int, default=2,
@@ -76,13 +76,13 @@ if __name__ == '__main__':
     env, env_params = instance_env(args, environment_name, seed=args.seed)
     # Observation preprocessing
     env, env_params = wrap_env(env, env_params)
-    env_params['action_shape'] = env.action_space.shape
 
-    # Agent args    
+    # Agent args
     agent_params = dict(
         action_shape=env_params['action_shape'],
         discount_factor=args.discount_factor,
         batch_size=args.batch_size,
+        expl_noise=args.exploration_noise
     )
     print('state_shape', env_params['state_shape'])
     if args.is_vector or not args.is_pixels:
@@ -106,36 +106,34 @@ if __name__ == '__main__':
         is_pixels=args.is_pixels,
         is_multimodal=env_params['is_multimodal'],
         use_augmentation=False)
-    print('max_action', approximator_params['action_range'])
 
     if args.is_srl:
         agent_class = SRLTD3Agent
-        q_approximator = SRLTD3Function
+        policy = SRLTD3Function
         ae_models = args2ae_model(args, env_params)
         # approximator_params['encoder_tau'] = args.encoder_tau
         approximator_params['latent_dim'] = (args.latent_dim * len(ae_models),)
         agent_params['ae_models'] = ae_models
+        agent_params['encoder_only'] = args.encoder_only
         agent_params['reconstruct_freq'] = args.reconstruct_frequency
         agent_params['srl_loss'] = args.use_srl_loss
-        agent_params['priors'] = args.use_priors
     else:
         agent_class = TD3Agent
-        q_approximator = TD3Function
+        policy = TD3Function
         if args.is_pixels:
-            approximator_params['q_app_fn'] = QFeaturesNetwork
-            approximator_params['q_app_params'] = dict(
-                state_shape=env_params['state_shape'],
-                action_shape=agent_params['action_shape'])
+            approximator_params['preprocess'] = QFeaturesNetwork(
+                env_params['state_shape'], env_params['action_shape'], only_cnn=True)
+            approximator_params['latent_dim'] = approximator_params['preprocess'].feature_dim
         else:
             approximator_params['latent_dim'] = env_params['state_shape']
     agent_params.update(
-        dict(approximator=q_approximator(**approximator_params)))
+        dict(approximator=policy(**approximator_params)))
 
     # Memory buffer args
     memory_params = dict(
         buffer_size=args.memory_capacity,
         obs_shape=env_params['state_shape'],
-        action_shape=agent_params['action_shape'],
+        action_shape=env_params['action_shape'],
         is_multimodal=env_params['is_multimodal']
     )
     if env_params['is_multimodal']:
@@ -190,6 +188,10 @@ if __name__ == '__main__':
     agent_params.update(dict(approximator=approximator_params))
     agent_params_save = agent_params.copy()
     agent_params_save.update(dict(is_srl=args.is_srl))
+
+    # environment meta info
+    env_params['target_quadrants'] = env.quadrants.tolist()
+    env_params['flight_area'] = env.flight_area.tolist()
 
     save_dict_json(env_params, outfolder / 'args_environment.json')
     save_dict_json(agent_params_save, outfolder / 'args_agent.json')

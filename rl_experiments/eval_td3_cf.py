@@ -12,8 +12,8 @@ import torch
 from pathlib import Path
 
 from uav_navigation.td3.agent import TD3Agent, TD3Function
-from uav_navigation.net import QFeaturesNetwork
 from uav_navigation.td3.srl import SRLTD3Agent, SRLTD3Function
+from uav_navigation.net import QFeaturesNetwork
 from uav_navigation.utils import load_json_dict
 from uav_navigation.utils import evaluate_agent
 
@@ -51,7 +51,7 @@ def parse_args():
     arg_env.add_argument("--init-altitude", type=float, default=1.0,
                          help='Minimum height distance to begin the mission.')
     arg_env.add_argument("--altitude-limits", type=list_of_float,
-                         default=[0.25, 2.25], help='Vertical flight limits.')
+                         default=[0.25, 2.], help='Vertical flight limits.')
     arg_env.add_argument("--target-pos", type=list_of_int, default=None,
                          help='Cuadrant number for target position.')
     arg_env.add_argument("--target-dim", type=list_of_float, default=[0.05, 0.02],
@@ -62,7 +62,6 @@ def parse_args():
 
 
 def run_evaluation(seed_val, logpath, episode):
-    import pprint
     torch.manual_seed(seed_val)
     np.random.seed(seed_val)
 
@@ -88,7 +87,6 @@ def run_evaluation(seed_val, logpath, episode):
 
     # Create the environment
     env, _ = instance_env(env_params, name=environment_name)
-
     # Observation preprocessing
     env, _ = wrap_env(env, env_params)
 
@@ -101,22 +99,20 @@ def run_evaluation(seed_val, logpath, episode):
     del agent_params['is_srl']
     approximator_params = agent_params['approximator']
     approximator_params['obs_space'] = env.observation_space
-    approximator_params['max_action'] = env.action_space.high
+    approximator_params['action_range'] = [env.action_space.low, env.action_space.high]
     if is_srl:
         agent_class = SRLTD3Agent
-        q_approximator = SRLTD3Function
+        policy = SRLTD3Function
     else:
         agent_class = TD3Agent
-        q_approximator = TD3Function
+        policy = TD3Function
 
     print('state_shape', env_params['state_shape'])
     print('action_shape', agent_params['action_shape'])
 
     # Instantiate an init evaluation
-    pprint.pprint(approximator_params)
-    # pprint(agent_params)
     agent_params.update(
-        dict(approximator=q_approximator(**approximator_params)))
+        dict(approximator=policy(**approximator_params)))
     training_params = load_json_dict(logpath / 'args_training.json')
 
     # Video recording callback
@@ -132,6 +128,7 @@ def run_evaluation(seed_val, logpath, episode):
         agent = agent_class(**agent_params)
         agent.load(logpath / agent_path)
         agent.expl_noise = 0.0  # ensure exploitation
+
         store_callback = StoreStepData(
             logpath / f"history_eval_{log_ep+1:03d}.csv", n_sensors=4)
         store_callback._ep = log_ep

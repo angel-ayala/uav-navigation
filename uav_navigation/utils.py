@@ -178,13 +178,13 @@ def run_agent(agent, env, training_steps, mem_steps, eval_interval,
     return total_reward, total_episodes
 
 
-def evaluate_agent(agent, env, eval_steps, eval_epsilon=False, fire_quadrant=2, step_callback=None):
+def evaluate_agent(agent, env, eval_steps, eval_epsilon=None, fire_quadrant=2, step_callback=None):
     timemark = time.time()
     state, info = env.reset(fire_quadrant=fire_quadrant)
     ep_reward = 0
     ep_steps = 0
     end = False
-    if eval_epsilon:
+    if eval_epsilon is not None:
         curr_epsilon = agent.epsilon
         agent.epsilon = eval_epsilon
 

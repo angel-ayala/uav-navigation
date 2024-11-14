@@ -75,11 +75,11 @@ class SRLTD3Function(TD3Function, SRLFunction):
 
 class SRLTD3Agent(TD3Agent, SRLAgent):
     def __init__(self, action_shape, approximator, ae_models,
-                 discount_factor=0.99, expl_noise=0.1, memory_buffer=None,
-                 batch_size=128, reconstruct_freq=1, srl_loss=False,
+                 discount_factor=0.99, memory_buffer=None, batch_size=128,
+                 expl_noise=0.1, reconstruct_freq=1, srl_loss=False,
                  priors=False, encoder_only=False):
         TD3Agent.__init__(self, action_shape, approximator, discount_factor,
-                          expl_noise, memory_buffer, batch_size)
+                          memory_buffer, batch_size, expl_noise)
         SRLAgent.__init__(self, ae_models, reconstruct_freq=reconstruct_freq,
                           srl_loss=srl_loss, priors=priors, encoder_only=encoder_only)
 

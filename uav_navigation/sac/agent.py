@@ -208,16 +208,18 @@ class SACAgent(GenericAgent):
                  approximator,
                  discount_factor=0.99,
                  memory_buffer=None,
-                 batch_size=128):
+                 batch_size=128,
+                 sample=False):
         super(SACAgent, self).__init__(action_shape, approximator,
                                        discount_factor, memory_buffer, batch_size)
+        self.sample = sample
         if self.is_prioritized:
             self.memory.update_beta(0)
 
-    def select_action(self, state, sample=True):
+    def select_action(self, state):
         with torch.no_grad():
             state = self.approximator.format_obs(state).unsqueeze(0)
-            action = self.approximator.action_inference(state, sample=sample)
+            action = self.approximator.action_inference(state, self.sample)
         return action
 
     def update_critic(self, sampled_data, weight=None):

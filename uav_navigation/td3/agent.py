@@ -175,9 +175,9 @@ class TD3Agent(GenericAgent):
                  action_shape,
                  approximator,
                  discount_factor=0.99,
-                 expl_noise=0.1,
                  memory_buffer=None,
-                 batch_size=128):
+                 batch_size=128,
+                 expl_noise=0.1):
         super(TD3Agent, self).__init__(action_shape, approximator,
                                        discount_factor, memory_buffer, batch_size)
         self.expl_noise = expl_noise
