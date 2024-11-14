@@ -133,7 +133,7 @@ class SRLSACAgent(SACAgent, SRLAgent):
             sampled_data, self.discount_factor, weight=weight)
 
         z_l2 = latent_l2(z)
-        loss_z = 0.01 * z_l2
+        loss_z = 0.1 * z_l2
         summary_scalar('Loss/Encoder/Critic/L2', z_l2.item())
 
         self.approximator.update_critic(critic_loss + z_l2)
