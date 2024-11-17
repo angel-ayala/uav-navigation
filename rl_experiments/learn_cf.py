@@ -53,7 +53,7 @@ def parse_environment_args(parser):
                          help='Number of simulation steps for a RL step')
     arg_env.add_argument("--frame-stack", type=int, default=1,
                          help='Number of RL step to stack as observation.')
-    arg_env.add_argument("--goal-threshold", type=float, default=0.5,
+    arg_env.add_argument("--goal-threshold", type=float, default=0.25,
                          help='Minimum distance from the target.')
     arg_env.add_argument("--init-altitude", type=float, default=1.0,
                          help='Minimum height distance to begin the mission.')
@@ -266,8 +266,8 @@ def instance_env(args, name='webots_drone:webots_drone/DroneEnvDiscrete-v0',
             goal_threshold=args.goal_threshold,
             init_altitude=args.init_altitude,
             altitude_limits=args.altitude_limits,
-            fire_pos=args.target_pos,
-            fire_dim=args.target_dim,
+            target_pos=args.target_pos,
+            target_dim=args.target_dim,
             is_pixels=args.is_pixels,
             zone_steps=args.zone_steps)
 

@@ -7,8 +7,8 @@ Created on Wed Apr 10 23:23:24 2024
 """
 import torch
 import numpy as np
-from pytorch_msssim import MS_SSIM
-from pytorch_msssim import SSIM
+# from pytorch_msssim import MS_SSIM
+# from pytorch_msssim import SSIM
 
 
 def slowness_cost(h_t, h_t1):
@@ -204,11 +204,11 @@ def logarithmic_difference_loss(predicted, ground_truth, gamma=1.0):
     return loss
 
 
-class MS_SSIM_Loss(MS_SSIM):
-    def forward(self, img1, img2):
-        return 100*( 1 - super(MS_SSIM_Loss, self).forward(img1, img2) )
+# class MS_SSIM_Loss(MS_SSIM):
+#     def forward(self, img1, img2):
+#         return 100*( 1 - super(MS_SSIM_Loss, self).forward(img1, img2) )
 
 
-class SSIM_Loss(SSIM):
-    def forward(self, img1, img2):
-        return 1 - super(SSIM_Loss, self).forward(img1, img2)
+# class SSIM_Loss(SSIM):
+#     def forward(self, img1, img2):
+#         return 1 - super(SSIM_Loss, self).forward(img1, img2)

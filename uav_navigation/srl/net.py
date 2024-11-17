@@ -11,7 +11,7 @@ https://arxiv.org/abs/1910.01741
 import torch
 from torch import nn
 from torch import optim
-from adabelief_pytorch import AdaBelief
+# from adabelief_pytorch import AdaBelief
 
 from uav_navigation.net import Conv1dMLP
 from uav_navigation.net import MLP
@@ -31,10 +31,10 @@ def sgd_optimizer(model, learning_rate=1e-5, momentum=0.9, **kwargs):
                      nesterov=True, **kwargs)
 
 
-def adabelief_optimizer(model, learning_rate=1e-3):
-    return AdaBelief(model.parameters(), lr=learning_rate, eps=1e-16,
-                     betas=(0.9, 0.999), weight_decouple=True, rectify=False,
-                     print_change_log=False)
+# def adabelief_optimizer(model, learning_rate=1e-3):
+#     return AdaBelief(model.parameters(), lr=learning_rate, eps=1e-16,
+#                      betas=(0.9, 0.999), weight_decouple=True, rectify=False,
+#                      print_change_log=False)
 
 
 def preprocess_obs(obs, bits=5):

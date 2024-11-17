@@ -4,7 +4,7 @@ package_name = 'uav_navigation'
 
 setup(
     name=package_name,
-    version='3.2.0',    
+    version='3.3.0',    
     description='Code repository of reinforcement learning experiments for navigation using the gym-webots-drone environment',
     url='https://github.com/angel-ayala/uav-navigation',
     author='Angel Ayala',
@@ -12,11 +12,12 @@ setup(
     license='GPL-3.0',
     packages=[package_name],
     install_requires=['gym==0.26.0',
-                      'tqdm==4.66.1',
-                      'thop==0.1.1.*',
+                      'tqdm>=4.65.2',
+                      'torch==2.2.2',
+                      'thop>=0.1.1.*',
                       'pandas==2.1.4',
-                      'tensorboard==2.16.2',
-                      'webots-drone==1.8.0'],
+                      'tensorboard>=2.16.2',
+                      'webots-drone==2.1.0'],
     classifiers=[
         'Development Status :: 5 - Production/Stable',
         'Intended Audience :: Science/Research',

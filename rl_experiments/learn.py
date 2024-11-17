@@ -256,8 +256,8 @@ def instance_env(args, name='webots_drone:webots_drone/DroneEnvDiscrete-v0',
             goal_threshold=args.goal_threshold,
             init_altitude=args.init_altitude,
             altitude_limits=args.altitude_limits,
-            fire_pos=args.target_pos,
-            fire_dim=args.target_dim,
+            target_pos=args.target_pos,
+            target_dim=args.target_dim,
             is_pixels=args.is_pixels,
             zone_steps=args.zone_steps)
 

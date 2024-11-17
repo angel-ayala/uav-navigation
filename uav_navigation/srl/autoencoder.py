@@ -10,7 +10,7 @@ import copy
 import torch
 from torch.nn import functional as F
 from torch import optim
-from info_nce import InfoNCE
+# from info_nce import InfoNCE
 from uav_navigation.utils import soft_update_params
 from uav_navigation.utils import destack
 from uav_navigation.logger import summary_scalar
@@ -24,7 +24,7 @@ from .net import VectorEncoder
 from .net import VectorDecoder
 from .net import VectorDiffDecoder
 from .net import VectorMDPEncoder
-from .net import adabelief_optimizer
+# from .net import adabelief_optimizer
 from ..logger import log_image_batch
 # from .net import imu2pose_model
 # from .net import slowness_cost
