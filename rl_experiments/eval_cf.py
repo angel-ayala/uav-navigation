@@ -69,7 +69,6 @@ def run_evaluation(seed_val, logpath, episode):
     logpath = Path(logpath)
     agent_paths = [lp.name[:12] for lp in logpath.glob('**/agent_ep_*_q*')]
     agent_paths.sort()
-    episode = episode - 1
 
     # Environment args
     environment_name = 'webots_drone:webots_drone/CrazyflieEnvDiscrete-v0'

@@ -17,10 +17,7 @@ from uav_navigation.utils import load_json_dict
 from uav_navigation.utils import evaluate_agent
 
 from webots_drone.data import StoreStepData
-from webots_drone.data import VideoCallback
 
-from learn_cf import list_of_float
-from learn_cf import list_of_int
 from learn_cf import instance_env
 from learn_cf import wrap_env
 from eval_cf import parse_args
@@ -34,7 +31,6 @@ def run_evaluation(seed_val, logpath, episode):
     logpath = Path(logpath)
     agent_paths = [lp.name[:12] for lp in logpath.glob('**/agent_ep_*_actor*')]
     agent_paths.sort()
-    episode = episode - 1
 
     # Environment args
     environment_name = 'webots_drone:webots_drone/RealCrazyflieEnvContinuous-v0'
