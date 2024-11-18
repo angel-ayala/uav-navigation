@@ -24,41 +24,7 @@ from learn_cf import list_of_float
 from learn_cf import list_of_int
 from learn_cf import instance_env
 from learn_cf import wrap_env
-
-
-def parse_args():
-    parser = argparse.ArgumentParser()    # misc
-    parser.add_argument('--logspath', type=str,
-                        default='logs/TD3-srl_2023-11-28_00-13-33',
-                        help='Log path with training results.')
-    parser.add_argument('--seed', type=int, default=666)
-    parser.add_argument('--episode', type=int, default=-1,
-                        help='Indicate the episode number to execute, set -1 for all of them')
-    parser.add_argument('--eval-steps', type=int, default=300,  # 1m at 25 frames
-                        help='Epsilon value used for evaluation.')
-    parser.add_argument("--load-config", action='store_true',
-                        help="Whether if force config file's value argument'.")
-    parser.add_argument('--record', action='store_true',
-                        help='Specific if record or not a video simulation.')
-
-    arg_env = parser.add_argument_group('Environment')
-    arg_env.add_argument("--time-limit", type=int, default=60,  # 10m
-                         help='Max time (seconds) of the mission.')
-    arg_env.add_argument("--frame-skip", type=int, default=6,  # 200ms
-                         help='Number of simulation steps for a RL step')
-    arg_env.add_argument("--goal-threshold", type=float, default=0.5,
-                         help='Minimum distance from the target.')
-    arg_env.add_argument("--init-altitude", type=float, default=1.0,
-                         help='Minimum height distance to begin the mission.')
-    arg_env.add_argument("--altitude-limits", type=list_of_float,
-                         default=[0.25, 2.], help='Vertical flight limits.')
-    arg_env.add_argument("--target-pos", type=list_of_int, default=None,
-                         help='Cuadrant number for target position.')
-    arg_env.add_argument("--target-dim", type=list_of_float, default=[0.05, 0.02],
-                         help="Target's dimension size.")
-
-    args = parser.parse_args()
-    return args
+from eval_cf import parse_args
 
 
 def run_evaluation(seed_val, logpath, episode):
@@ -83,7 +49,7 @@ def run_evaluation(seed_val, logpath, episode):
         env_params['goal_threshold'] = args.goal_threshold
         env_params['init_altitude'] = args.init_altitude
         env_params['altitude_limits'] = args.altitude_limits
-        env_params['fire_dim'] = args.target_dim
+        env_params['target_dim'] = args.target_dim
 
     # Create the environment
     env, _ = instance_env(env_params, name=environment_name)
@@ -116,12 +82,9 @@ def run_evaluation(seed_val, logpath, episode):
     training_params = load_json_dict(logpath / 'args_training.json')
 
     # Video recording callback
-    if args.record:
-        videos_path = logpath / "videos"
-        vidcb = VideoCallback(videos_path, env)
-    else:
-        vidcb = None
+    vidcb = VideoCallback(logpath / "videos", env) if args.record else None
     for log_ep, agent_path in enumerate(agent_paths):
+        log_ep = int(str(agent_path).replace('agent_ep_', '').split("_")[0])
         if episode > 0 and log_ep != episode:
             continue
         print('Loading from', "/".join(str(agent_path).split("/")[-3:]))
@@ -132,12 +95,11 @@ def run_evaluation(seed_val, logpath, episode):
         store_callback = StoreStepData(
             logpath / f"history_eval_{log_ep+1:03d}.csv", n_sensors=4)
         store_callback._ep = log_ep
-        for fq in target_pos:
+        for tq in target_pos:
             if vidcb is not None:
-                vidcb.start_recording(videos_path / f"ep{log_ep:03d}_fq{fq:02d}.mp4")
-            evaluate_agent(agent, env, args.eval_steps,
-                           training_params['eval_epsilon'],
-                           fire_quadrant=fq,
+                vidcb.start_recording(f"ep{log_ep:03d}_tq{tq:02d}.mp4")
+            evaluate_agent(agent, env, args.eval_steps, None,
+                           target_quadrant=tq,
                            step_callback=store_callback)
             if vidcb is not None:
                 vidcb.stop_recording()

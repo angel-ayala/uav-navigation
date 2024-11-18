@@ -20,6 +20,7 @@ from uav_navigation.utils import load_json_dict
 from uav_navigation.utils import evaluate_agent
 
 from webots_drone.data import StoreStepData
+from webots_drone.data import VideoCallback
 from webots_drone.envs.preprocessor import ReducedActionSpace
 
 from learn import list_of_float
@@ -154,19 +155,34 @@ def run_evaluation(seed_val, logpath, episode):
     agent_params['approximator'] = policy(**approximator_params)
     agent = agent_class(**agent_params)
     training_params = load_json_dict(logpath / 'args_training.json')
+
+    # Video recording callback
+    if args.record:
+        videos_path = logpath / "videos"
+        vidcb = VideoCallback(videos_path, env)
+    else:
+        vidcb = None
+
     for log_ep, agent_path in enumerate(agent_paths):
+        log_ep = int(str(agent_path).replace('agent_ep_', '').split("_")[0])
         if episode > 0 and log_ep != episode:
             continue
         print('Loading from', "/".join(str(agent_path).split("/")[-3:]))
         agent = agent_class(**agent_params)
         agent.load(logpath / agent_path)
+        agent.sample = True  # ensure exploitation
+
         store_callback = StoreStepData(
-            logpath / f"history_eval_{log_ep+1:03d}.csv")
+            logpath / f"history_eval_{log_ep+1:03d}.csv", n_sensors=4)
         store_callback._ep = log_ep
-        for fc in target_pos:
-            evaluate_agent(agent, env, args.eval_steps, False,
-                           fire_cuadrant=fc,
+        for tq in target_pos:
+            if vidcb is not None:
+                vidcb.start_recording(f"ep{log_ep:03d}_tq{tq:02d}.mp4")
+            evaluate_agent(agent, env, args.eval_steps, None,
+                           target_quadrant=tq,
                            step_callback=store_callback)
+            if vidcb is not None:
+                vidcb.stop_recording()
 
 
 if __name__ == '__main__':
