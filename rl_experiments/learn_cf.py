@@ -279,9 +279,9 @@ def instance_env(args, name='webots_drone:webots_drone/DroneEnvDiscrete-v0',
         env_params['frame_stack'] = args.frame_stack
         env_params['is_multimodal'] = args.is_pixels and args.is_vector
         env_params['is_vector'] = args.is_vector
-        env_params['target_dist'] = args.add_target_dist
-        env_params['target_pos'] = args.add_target_pos
-        env_params['target_dim'] = args.add_target_dim
+        env_params['target_dist2obs'] = args.add_target_dist
+        env_params['target_pos2obs'] = args.add_target_pos
+        env_params['target_dim2obs'] = args.add_target_dim
         env_params['action2obs'] = args.add_action
         env_params['uav_data'] = args.uav_data
 
@@ -303,9 +303,9 @@ def wrap_env(env, env_params):
     if env_params['is_multimodal']:
         env = MultiModalObservation(env, uav_data=env_params['uav_data'],
                                     frame_stack=env_params['frame_stack'],
-                                    target_pos=env_params['target_pos'],
-                                    target_dim=env_params['target_dim'],
-                                    target_dist=env_params['target_dist'],
+                                    target_pos=env_params['target_pos2obs'],
+                                    target_dim=env_params['target_dim2obs'],
+                                    target_dist=env_params['target_dist2obs'],
                                     add_action=env_params['action2obs'],
                                     **env_range)
         env_params['image_shape'] = env.observation_space[0].shape
@@ -314,9 +314,9 @@ def wrap_env(env, env_params):
     else:
         if env_params['is_vector']:
             env = CustomVectorObservation(env, uav_data=env_params['uav_data'],
-                                          target_dist=env_params['target_dist'],
-                                          target_pos=env_params['target_pos'],
-                                          target_dim=env_params['target_dim'],
+                                          target_dist=env_params['target_dist2obs'],
+                                          target_pos=env_params['target_pos2obs'],
+                                          target_dim=env_params['target_dim2obs'],
                                           add_action=env_params['action2obs'],
                                           **env_range)
 
