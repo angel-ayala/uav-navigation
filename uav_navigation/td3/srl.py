@@ -72,6 +72,14 @@ class SRLTD3Function(TD3Function, SRLFunction):
         TD3Function.load(self, path, eval_only)
         SRLFunction.load(self, path, ae_models, encoder_only, eval_only)
 
+    def train_mode(self):
+        TD3Function.train_mode(self)
+        SRLFunction.train_mode(self)
+
+    def eval_mode(self):
+        TD3Function.eval_mode(self)
+        SRLFunction.eval_mode(self)
+
 
 class SRLTD3Agent(TD3Agent, SRLAgent):
     def __init__(self, action_shape, approximator, ae_models,

@@ -164,10 +164,11 @@ if __name__ == '__main__':
         path_suffix = '-srl' if args.is_srl else ''
         timestamp = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
         # Summary folder
-        outfolder = Path(f"logs_cf_{path_prefix}/TD3{path_suffix}_{timestamp}")
+        outfolder = Path(f"logs_cf_{path_prefix}/td3{path_suffix}_{timestamp}")
     else:
         outfolder = Path(args.logspath)
-    outfolder.mkdir(parents=True)
+    agents_folder = outfolder / 'agents'
+    agents_folder.mkdir(parents=True)
     print('Saving logs at:', outfolder)
 
     store_callback = StoreStepData(outfolder / 'history_training.csv', n_sensors=4)
@@ -178,7 +179,7 @@ if __name__ == '__main__':
         eval_interval=args.eval_interval,
         eval_steps=args.eval_steps,
         eval_epsilon=None,
-        outpath=outfolder)
+        outpath=agents_folder)
     # update data for log output
     run_params_save = run_params.copy()
     run_params_save.update(dict(

@@ -66,7 +66,7 @@ def obs_reconstruction_loss(true_obs, rec_obs):
         true_obs = preprocess_obs(true_obs)
         # de-stack
         true_obs, _ = destack(true_obs, len_hist=3, is_rgb=True)
-    
+
     output_obs = rec_obs.reshape(true_obs.shape)
 
     return F.mse_loss(output_obs, true_obs)
@@ -278,6 +278,18 @@ class AEModel:
             for i, (d, dopt) in enumerate(zip(self.decoder, self.decoder_optim)):
                 d.load_state_dict(checkpoint[f"decoder_state_dict_{i}"])
                 dopt.load_state_dict(checkpoint[f"decoder_optimizer_state_dict_{i}"])
+
+    def train(self):
+        for enc in self.encoder:
+            enc.train()
+        for dec in self.decoder:
+            dec.train()
+
+    def eval(self):
+        for enc in self.encoder:
+            enc.eval()
+        for dec in self.decoder:
+            dec.eval()
 
 
     def __repr__(self):

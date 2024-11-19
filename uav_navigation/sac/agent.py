@@ -45,7 +45,7 @@ class SACFunction(GenericFunction):
                                           is_multimodal, use_augmentation)
 
         # self.preprocess = preproces
-        # Actor 
+        # Actor
         self.actor_update_freq = actor_update_freq
         self.actor = DiagGaussianActor(latent_dim, action_shape[-1], hidden_dim,
                                        log_std_bounds=actor_log_std_bounds).to(self.device)
@@ -162,7 +162,7 @@ class SACFunction(GenericFunction):
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
         self.actor_optimizer.step()
-        
+
         if self.adjust_temperature:
             self.log_alpha_optimizer.zero_grad()
             alpha_loss = (self.alpha * (-log_prob - self.target_entropy).detach()).mean()
@@ -175,7 +175,6 @@ class SACFunction(GenericFunction):
         model_chkpt = {
             'actor_state_dict': self.actor.state_dict(),
             'critic_state_dict': self.critic.state_dict(),
-            'critic_target_state_dict': self.critic_target.state_dict(),
             'actor_optimizer_state_dict': self.actor_optimizer.state_dict(),
             'critic_optimizer_state_dict': self.critic_optimizer.state_dict(),
             'log_alpha_optimizer_state_dict': self.log_alpha_optimizer.state_dict()
@@ -189,7 +188,7 @@ class SACFunction(GenericFunction):
         checkpoint = torch.load(ac_app_path, map_location=self.device)
         self.actor.load_state_dict(checkpoint['actor_state_dict'])
         self.critic.load_state_dict(checkpoint['critic_state_dict'])
-        self.critic_target.load_state_dict(checkpoint['critic_target_state_dict'])
+        self.critic_target.load_state_dict(checkpoint['critic_state_dict'])
         # if 'preprocess_dict' in checkpoint.keys():
         #     self.preprocess.load_state_dict(checkpoint['preprocess_dict'])
 
@@ -201,6 +200,16 @@ class SACFunction(GenericFunction):
             # Ensure the models are in evaluation mode after loading
             self.actor.eval()
             self.critic.eval()
+
+    def train_mode(self):
+        self.actor.train()
+        self.critic.train()
+        self.critic_target.train()
+
+    def eval_mode(self):
+        self.actor.eval()
+        self.critic.eval()
+        self.critic_target.eval()
 
 
 class SACAgent(GenericAgent):
@@ -267,3 +276,13 @@ class SACAgent(GenericAgent):
 
         if step % self.approximator.critic_target_update_freq == 0:
             self.approximator.update_critic_target()
+
+    def learn_mode(self):
+        # swap sample value for learning
+        self.sample = False
+        super().learn_mode()
+
+    def eval_mode(self):
+        # swap sample value for evaluation
+        self.sample = True
+        super().eval_mode()

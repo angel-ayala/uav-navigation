@@ -46,7 +46,7 @@ class TD3Function(GenericFunction):
         self.actor = Actor(latent_dim, action_shape[-1], self.action_range[1],
                            hidden_dim).to(self.device)
         self.actor_target = copy.deepcopy(self.actor)
-        
+
         # Critic
         self.critic = Critic(latent_dim, action_shape[-1], hidden_dim
                              ).to(self.device)
@@ -169,6 +169,18 @@ class TD3Function(GenericFunction):
             self.actor.eval()
             self.critic.eval()
 
+    def train_mode(self):
+        self.actor.train()
+        self.actor_target.train()
+        self.critic.train()
+        self.critic_target.train()
+
+    def eval_mode(self):
+        self.actor.eval()
+        self.actor_target.eval()
+        self.critic.eval()
+        self.critic_target.eval()
+
 
 class TD3Agent(GenericAgent):
     def __init__(self,
@@ -181,6 +193,8 @@ class TD3Agent(GenericAgent):
         super(TD3Agent, self).__init__(action_shape, approximator,
                                        discount_factor, memory_buffer, batch_size)
         self.expl_noise = expl_noise
+        self.expl_noise_eval = 0.0
+        self._tmp_expl_noise = self.expl_noise
         if self.is_prioritized:
             self.memory.update_beta(0)
 
@@ -189,7 +203,7 @@ class TD3Agent(GenericAgent):
             state = self.approximator.format_obs(state).unsqueeze(0)
             action = self.approximator.sample_action(state, self.expl_noise)
         return action
-    
+
     def update_critic(self, sampled_data, weight=None):
         critic_loss = self.approximator.compute_critic_loss(
             sampled_data, self.discount_factor, weight=weight)
@@ -232,3 +246,14 @@ class TD3Agent(GenericAgent):
 
         # if step % self.approximator.critic_target_update_freq == 0:
         #     self.approximator.update_critic_target()
+
+    def learn_mode(self):
+        # swap exploration noise value for learning
+        self.expl_noise = self._tmp_expl_noise
+        super().learn_mode()
+
+    def eval_mode(self):
+        # swap exploration noise value for evaluation
+        self._tmp_expl_noise = self.expl_noise
+        self.expl_noise = self.expl_noise_eval
+        super().eval_mode()

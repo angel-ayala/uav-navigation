@@ -16,6 +16,8 @@ from uav_navigation.net import QNetwork, QFeaturesNetwork
 from uav_navigation.srl.agent import SRLDDQNAgent, SRLQFunction
 from uav_navigation.utils import load_json_dict
 from uav_navigation.utils import evaluate_agent
+from uav_navigation.logger import summary_create
+from uav_navigation.logger import summary_step
 
 from webots_drone.data import StoreStepData
 from webots_drone.data import VideoCallback
@@ -61,13 +63,41 @@ def parse_args():
     return args
 
 
+def iterate_agents_evaluation(agent_class, agent_params, agent_paths, env,
+                              target_pos, eval_steps, episode, logpath,
+                              log_params, record_video=False):
+    summary_create(logpath.parent, logpath.name)
+    # Video recording callback
+    vidcb = VideoCallback(logpath / "videos", env) if record_video else None
+    for agent_path in agent_paths:
+        agent_name = agent_path.name
+        log_ep = int(str(agent_name).replace('agent_ep_', '').split("_")[0])
+        if episode > 0 and log_ep != episode:
+            continue
+        print('Loading', agent_name[:12])
+        agent = agent_class(**agent_params)
+        agent.load(agent_path.parent / agent_name[:12])
+        store_callback = StoreStepData(
+            logpath / f"history_{log_ep:03d}.csv", **log_params)
+        store_callback._ep = log_ep
+        summary_step(log_ep)
+        agent.eval_mode()
+        for tq in target_pos:
+            if vidcb is not None:
+                vidcb.start_recording(f"ep{log_ep:03d}_tq{tq:02d}.mp4")
+            evaluate_agent(agent, env, eval_steps, target_quadrant=tq,
+                           step_callback=store_callback)
+            if vidcb is not None:
+                vidcb.stop_recording()
+
+
 def run_evaluation(seed_val, logpath, episode):
     torch.manual_seed(seed_val)
     np.random.seed(seed_val)
 
     # Define constants
     logpath = Path(logpath)
-    agent_paths = [lp.name[:12] for lp in logpath.glob('**/agent_ep_*_q*')]
+    agent_paths = list(logpath.glob('**/agent_ep_*_q*'))
     agent_paths.sort()
 
     # Environment args
@@ -114,29 +144,12 @@ def run_evaluation(seed_val, logpath, episode):
     # Instantiate an init evaluation
     agent_params.update(
         dict(approximator=q_approximator(**approximator_params)))
-    training_params = load_json_dict(logpath / 'args_training.json')
 
-    # Video recording callback
-    vidcb = VideoCallback(logpath / "videos", env) if args.record else None
-    for agent_path in agent_paths:
-        log_ep = int(str(agent_path).replace('agent_ep_', '').split("_")[0])
-        if episode > 0 and log_ep != episode:
-            continue
-        print('Loading from', "/".join(str(agent_path).split("/")[-3:]))
-        agent = agent_class(**agent_params)
-        agent.load(logpath / agent_path)
-        store_callback = StoreStepData(
-            logpath / f"history_eval_{log_ep+1:03d}.csv", n_sensors=4)
-        store_callback._ep = log_ep
-        for tq in target_pos:
-            if vidcb is not None:
-                vidcb.start_recording(f"ep{log_ep:03d}_tq{tq:02d}.mp4")
-            evaluate_agent(agent, env, args.eval_steps,
-                           training_params['eval_epsilon'],
-                           target_quadrant=tq,
-                           step_callback=store_callback)
-            if vidcb is not None:
-                vidcb.stop_recording()
+    eval_logpath = logpath / 'eval'
+    log_params = {'n_sensors': 4}
+    iterate_agents_evaluation(agent_class, agent_params, agent_paths, env,
+                              target_pos, args.eval_steps, episode,
+                              eval_logpath, log_params, record_video=args.record)
 
 
 if __name__ == '__main__':

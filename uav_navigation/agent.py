@@ -80,6 +80,12 @@ class GenericFunction:
         else:
             return self.format_unimodal_obs(obs, augment)
 
+    def train_mode(self):
+        raise NotImplementedError
+
+    def eval_mode(self):
+        raise NotImplementedError
+
 
 class QFunction(GenericFunction):
 
@@ -175,6 +181,14 @@ class QFunction(GenericFunction):
             self.q_network.eval()
             self.target_q_network.eval()
 
+    def train_mode(self):
+        self.q_network.train()
+        self.target_q_network.train()
+
+    def eval_mode(self):
+        self.q_network.eval()
+        self.target_q_network.eval()
+
 
 class GenericAgent:
     def __init__(self,
@@ -205,6 +219,12 @@ class GenericAgent:
     def load(self, path, eval_only=True):
         self.approximator.load(path, eval_only)
 
+    def learn_mode(self):
+        self.approximator.train_mode()
+
+    def eval_mode(self):
+        self.approximator.eval_mode()
+
 
 class DDQNAgent(GenericAgent):
     def __init__(self,
@@ -227,6 +247,8 @@ class DDQNAgent(GenericAgent):
         self.update_epsilon(0)
         self.target_update_freq = target_update_freq
         self.train_freq = train_freq
+        self._tmp_epsilon = self.epsilon
+        self.epsilon_eval = epsilon_end
 
     def select_action(self, state):
         # Choose action using epsilon-greedy policy
@@ -296,6 +318,17 @@ class DDQNAgent(GenericAgent):
             self.batch_size, device=self.approximator.device)
         td_loss = self.compute_td_loss(sampled_data, augment)
         self.approximator.update(td_loss)
+
+    def learn_mode(self):
+        # swap epsilon value for learning
+        self.epsilon = self._tmp_epsilon
+        super().learn_mode()
+
+    def eval_mode(self):
+        # swap epsilon value for evaluation
+        self._tmp_epsilon = self.epsilon
+        self.epsilon = self.epsilon_eval
+        super().eval_mode()
 
 
 # TODO: update for PrioritizedReplayBuffer

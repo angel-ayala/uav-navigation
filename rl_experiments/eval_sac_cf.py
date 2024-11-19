@@ -6,7 +6,6 @@ Created on Tue Nov 14 20:33:17 2023
 @author: Angel Ayala
 """
 
-import argparse
 import numpy as np
 import torch
 from pathlib import Path
@@ -15,13 +14,10 @@ from uav_navigation.sac.agent import SACAgent, SACFunction
 from uav_navigation.sac.srl import SRLSACAgent, SRLSACFunction
 from uav_navigation.net import QFeaturesNetwork
 from uav_navigation.utils import load_json_dict
-from uav_navigation.utils import evaluate_agent
-
-from webots_drone.data import StoreStepData
-from webots_drone.data import VideoCallback
 
 from learn_cf import instance_env
 from learn_cf import wrap_env
+from eval_cf import iterate_agents_evaluation
 from eval_cf import parse_args
 
 
@@ -31,7 +27,7 @@ def run_evaluation(seed_val, logpath, episode):
 
     # Define constants
     logpath = Path(logpath)
-    agent_paths = [lp.name[:12] for lp in logpath.glob('**/agent_ep_*_actor*')]
+    agent_paths = list(logpath.glob('**/agent_ep_*_actor*'))
     agent_paths.sort()
 
     # Environment args
@@ -76,30 +72,12 @@ def run_evaluation(seed_val, logpath, episode):
     # Instantiate an init evaluation
     agent_params.update(
         dict(approximator=policy(**approximator_params)))
-    training_params = load_json_dict(logpath / 'args_training.json')
 
-    # Video recording callback
-    vidcb = VideoCallback(logpath / "videos", env) if args.record else None
-    for log_ep, agent_path in enumerate(agent_paths):
-        log_ep = int(str(agent_path).replace('agent_ep_', '').split("_")[0])
-        if episode > 0 and log_ep != episode:
-            continue
-        print('Loading from', "/".join(str(agent_path).split("/")[-3:]))
-        agent = agent_class(**agent_params)
-        agent.load(logpath / agent_path)
-        agent.sample = True  # ensure exploitation
-
-        store_callback = StoreStepData(
-            logpath / f"history_eval_{log_ep+1:03d}.csv", n_sensors=4)
-        store_callback._ep = log_ep
-        for tq in target_pos:
-            if vidcb is not None:
-                vidcb.start_recording(f"ep{log_ep:03d}_tq{tq:02d}.mp4")
-            evaluate_agent(agent, env, args.eval_steps, None,
-                           target_quadrant=tq,
-                           step_callback=store_callback)
-            if vidcb is not None:
-                vidcb.stop_recording()
+    eval_logpath = logpath / 'eval'
+    log_params = {'n_sensors': 4}
+    iterate_agents_evaluation(agent_class, agent_params, agent_paths, env,
+                              target_pos, args.eval_steps, episode,
+                              eval_logpath, log_params, record_video=args.record)
 
 
 if __name__ == '__main__':

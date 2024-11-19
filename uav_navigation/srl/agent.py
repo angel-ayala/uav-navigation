@@ -32,13 +32,13 @@ def target_pos2dist(obs_1d):
     elif _obs_1d.dim() == 2:
         pos_uav = _obs_1d[:, 6:9]
         pos_target = _obs_1d[:, -3:]
-        
+
     dist = pos_uav - pos_target
     if _obs_1d.dim() == 3:
         _obs_1d[:, :, 13:] = dist
     elif _obs_1d.dim() == 2:
         _obs_1d[:, 13:] = dist
-        
+
     return _obs_1d
 
 
@@ -208,6 +208,14 @@ class SRLFunction:
             self.add_autoencoder(m, ae_params)
             self.models[i].load_weights(ae_path, self.device, encoder_only)
 
+    def train_mode(self):
+        for m in self.models:
+            m.train()
+
+    def eval_mode(self):
+        for m in self.models:
+            m.eval()
+
     # def append_prior(self, belief_model, latent_source, obs_target, learning_rate=1e-3):
     #     belief_model.to(self.device)
     #     belief_model.apply(weight_init)
@@ -301,6 +309,14 @@ class SRLQFunction(QFunction, SRLFunction):
     def load(self, path, ae_models, encoder_only=False, eval_only=False):
         QFunction.load(self, path, eval_only)
         SRLFunction.load(self, path, ae_models, encoder_only, eval_only)
+
+    def train_mode(self):
+        QFunction.train_mode(self)
+        SRLFunction.train_mode(self)
+
+    def eval_mode(self):
+        QFunction.eval_mode(self)
+        SRLFunction.eval_mode(self)
 
 
 class SRLAgent:

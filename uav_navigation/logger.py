@@ -14,9 +14,10 @@ writer = None
 step = 0
 
 
-def summary_create(path):
+def summary_create(path, suffix="learn"):
     global writer
-    writer = SummaryWriter(path)
+    if writer is None:
+        writer = SummaryWriter(path, filename_suffix=suffix)
     return writer
 
 

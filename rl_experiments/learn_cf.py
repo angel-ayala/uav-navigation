@@ -193,7 +193,7 @@ def parse_training_args(parser):
                               help='Minibatch size for training.')
     arg_training.add_argument('--eval-interval', type=int, default=9000,  # 30m at 25 frames
                               help='Steps interval for progress evaluation.')
-    arg_training.add_argument('--eval-steps', type=int, default=300,  # 1m at 25 frames
+    arg_training.add_argument('--eval-steps', type=int, default=60,  # 1m at 25 frames
                               help='Number of evaluation steps.')
     return arg_training
 
@@ -470,6 +470,7 @@ if __name__ == '__main__':
             num_layers=args.num_layers)
 
         agent_params['ae_models'] = ae_models
+        agent_params['encoder_only'] = args.encoder_only
         agent_params['reconstruct_freq'] = args.reconstruct_frequency
         agent_params['srl_loss'] = args.use_srl_loss
         agent_params['priors'] = args.use_priors
@@ -495,7 +496,7 @@ if __name__ == '__main__':
     memory_params = dict(
         buffer_size=args.memory_capacity,
         obs_shape=env_params['state_shape'],
-        action_shape=agent_params['action_shape'],
+        action_shape=env_params['action_shape'],
         is_multimodal=env_params['is_multimodal']
     )
     if env_params['is_multimodal']:
@@ -529,7 +530,8 @@ if __name__ == '__main__':
         outfolder = Path(f"logs_cf_{path_prefix}/ddqn{path_suffix}_{timestamp}")
     else:
         outfolder = Path(args.logspath)
-    outfolder.mkdir(parents=True)
+    agents_folder = outfolder / 'agents'
+    agents_folder.mkdir(parents=True)
     print('Saving logs at:', outfolder)
 
     store_callback = StoreStepData(outfolder / 'history_training.csv',
@@ -542,7 +544,7 @@ if __name__ == '__main__':
         eval_interval=args.eval_interval,
         eval_steps=args.eval_steps,
         eval_epsilon=args.eval_epsilon,
-        outpath=outfolder)
+        outpath=agents_folder)
     # update data for log output
     run_params_save = run_params.copy()
     run_params_save.update(dict(

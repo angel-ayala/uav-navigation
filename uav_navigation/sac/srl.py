@@ -63,7 +63,7 @@ class SRLSACFunction(SACFunction, SRLFunction):
                              preprocess=False)
         SRLFunction.__init__(self, decoder_latent_lambda)
         self.encoder_tau = encoder_tau
-    
+
     def fuse_encoder(self):
         # fuse encoder with Critic function
         critic = copy.deepcopy(self.critic)
@@ -117,17 +117,25 @@ class SRLSACFunction(SACFunction, SRLFunction):
         SACFunction.load(self, path, eval_only)
         SRLFunction.load(self, path, ae_models, encoder_only, eval_only)
 
+    def train_mode(self):
+        SACFunction.train_mode(self)
+        SRLFunction.train_mode(self)
+
+    def eval_mode(self):
+        SACFunction.eval_mode(self)
+        SRLFunction.eval_mode(self)
+
 
 class SRLSACAgent(SACAgent, SRLAgent):
     def __init__(self, action_shape, approximator, ae_models,
                  discount_factor=0.99, memory_buffer=None, batch_size=128,
-                 reconstruct_freq=1, srl_loss=False, priors=False,
+                 sample=False, reconstruct_freq=1, srl_loss=False, priors=False,
                  encoder_only=False):
-        SACAgent.__init__(self, action_shape, approximator,
-                          discount_factor, memory_buffer, batch_size)
+        SACAgent.__init__(self, action_shape, approximator, discount_factor,
+                          memory_buffer, batch_size, sample)
         SRLAgent.__init__(self, ae_models, reconstruct_freq=reconstruct_freq,
                           srl_loss=srl_loss, priors=priors, encoder_only=encoder_only)
-    
+
     def update_critic(self, sampled_data, weight=None):
         critic_loss, z = self.approximator.compute_critic_loss(
             sampled_data, self.discount_factor, weight=weight)

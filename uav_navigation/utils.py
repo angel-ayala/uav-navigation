@@ -16,6 +16,7 @@ from tqdm import tqdm
 from .logger import summary
 from .logger import summary_create
 from .logger import summary_step
+from .logger import summary_scalar
 
 
 def profile_model(model, input_shape, device, action_shape=None):
@@ -97,7 +98,7 @@ def format_obs(observation, is_pixels=False):
 
 def run_agent(agent, env, training_steps, mem_steps, eval_interval,
               eval_steps, eval_epsilon, outpath, step_callback=None):
-    summary_create(outpath / 'logs')
+    summary_create(outpath.parent)
     ended = True
     total_reward = 0
     total_episodes = 1
@@ -114,7 +115,8 @@ def run_agent(agent, env, training_steps, mem_steps, eval_interval,
                 if step_callback:
                     step_callback.set_init_state(state, info)
             action, reward, next_state, ended = do_step(
-                agent, env, state, step_callback, must_remember=True, random_step=True)
+                agent, env, state, step_callback, must_remember=True,
+                random_step=True)
             state = next_state
         elapsed_time = time.time() - timemark
         membar.clear()
@@ -125,6 +127,8 @@ def run_agent(agent, env, training_steps, mem_steps, eval_interval,
     tbar = tqdm(range(eval_interval), desc=f"Episode {total_episodes:03d}",
                 leave=False, unit='step',
                 bar_format='{desc}: {n:04d}|{bar}|[{rate_fmt}]')
+
+    agent.learn_mode()
     for step in range(training_steps):
         summary_step(step)
         if ended:
@@ -154,12 +158,13 @@ def run_agent(agent, env, training_steps, mem_steps, eval_interval,
             print(f"Episode {total_episodes:03d}\n- Learning: {elapsed_time:.3f} seconds\tR: {ep_reward:.4f}\tS: {ep_steps}")
             agent.save(outpath / f"agent_ep_{total_episodes:03d}")
             if eval_steps > 0:
-                for fc in range(4):
-                    e_reward, e_steps, e_time = evaluate_agent(
-                        agent, env, eval_steps, eval_epsilon, fire_quadrant=fc,
-                        step_callback=step_callback)
-                    summary().add_scalar(f"Evaluation/EpRewardC{fc}", e_reward, total_episodes)
-                    summary().add_scalar(f"Evaluation/EpNumberStepsC{fc}", e_steps, total_episodes)
+                summary_step(total_episodes)
+                agent.eval_mode()
+                for tq in range(len(env.quadrants)):
+                    evaluate_agent(agent, env, eval_steps, target_quadrant=tq,
+                                   step_callback=step_callback)
+                summary().flush()
+                agent.learn_mode()
             total_episodes += 1
             tbar.reset()
             tbar.set_description(f"Episode {total_episodes:03d}")
@@ -178,15 +183,12 @@ def run_agent(agent, env, training_steps, mem_steps, eval_interval,
     return total_reward, total_episodes
 
 
-def evaluate_agent(agent, env, eval_steps, eval_epsilon=None, target_quadrant=2, step_callback=None):
+def evaluate_agent(agent, env, eval_steps, target_quadrant=2, step_callback=None):
     timemark = time.time()
     state, info = env.reset(target_pos=target_quadrant)
     ep_reward = 0
     ep_steps = 0
     end = False
-    if eval_epsilon is not None:
-        curr_epsilon = agent.epsilon
-        agent.epsilon = eval_epsilon
 
     if step_callback:
         step_callback.set_init_state(state, info)
@@ -204,11 +206,13 @@ def evaluate_agent(agent, env, eval_steps, eval_epsilon=None, target_quadrant=2,
             end = True
 
     elapsed_time = time.time() - timemark
+    sys.stdout.write(f"\r- Evaluation: {elapsed_time:.3f} seconds\t"
+                     f"R: {ep_reward:.4f}\tS: {ep_steps}\n")
     sys.stdout.flush()
-    sys.stdout.write(f"\r- Evaluation: {elapsed_time:.3f} seconds\tR: {ep_reward:.4f}\tS: {ep_steps}\n")
-    sys.stdout.flush()
-    if eval_epsilon:
-        agent.epsilon = curr_epsilon
+
+    summary_scalar(f"Evaluation/EpRewardQ{target_quadrant:02d}", ep_reward)
+    summary_scalar(f"Evaluation/EpNumberStepsQ{target_quadrant:02d}", ep_steps)
+
     return ep_reward, ep_steps, elapsed_time
 
 
