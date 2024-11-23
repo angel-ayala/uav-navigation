@@ -5,12 +5,17 @@ Created on Fri Nov  8 13:06:16 2024
 
 @author: Angel Ayala
 """
+import torch
+import copy
+
 from uav_navigation.td3.agent import TD3Agent
 from uav_navigation.td3.agent import TD3Function
 from uav_navigation.srl.agent import SRLAgent
 from uav_navigation.srl.agent import SRLFunction
 from uav_navigation.srl.autoencoder import latent_l2
 from uav_navigation.logger import summary_scalar
+
+from .net import TD3EncoderWrapper
 
 
 class SRLTD3Function(TD3Function, SRLFunction):
@@ -43,26 +48,25 @@ class SRLTD3Function(TD3Function, SRLFunction):
                              use_augmentation=use_augmentation)
         SRLFunction.__init__(self, decoder_latent_lambda)
 
+    def fuse_encoder2critic(self):
+        # Temporal copy
+        critic = copy.deepcopy(self.critic)
+        encoder = copy.deepcopy(self.models[0].encoder[0])
+        # Critic
+        self.critic = TD3EncoderWrapper(critic, encoder, detach_encoder=False)
+        self.critic_target = copy.deepcopy(self.critic)
+        # share autoencoder weights
+        self.critic.encoder.copy_weights_from(self.models[0].encoder[0])
+        # optimizers
+        critic_lr = self.critic_optimizer.param_groups[0]['lr']
+        self.critic_optimizer = torch.optim.Adam(
+            self.critic.parameters(), lr=critic_lr)
 
-    def action_inference(self, obs):
-        # print('SRL obs', obs.shape)
-        state = self.compute_z(obs).detach()
-        return super().action_inference(state)
+    def forward_actor(self, observation):
+        return self.actor(self.compute_z(observation).detach())
 
-    def compute_critic_loss(self, sampled_data, discount, weight=None):
-        # Sample replay buffer
-        obs, action, reward, next_obs, done = sampled_data
-        # print('SRL obs', obs.shape)
-        # print('SRL next_obs', next_obs.shape)
-        state = self.compute_z(obs)
-        next_state = self.compute_z(next_obs)
-        return super().compute_critic_loss([state, action, reward, next_state, done],
-                                           discount, weight=weight), state
-
-    def compute_actor_loss(self, obs):
-        # detach encoder, so we don't update it with the actor loss
-        obs = self.compute_z(obs).detach()
-        return super().compute_actor_loss(obs)
+    def forward_actor_target(self, observation):
+        return self.actor_target(self.compute_z(observation).detach())
 
     def save(self, path, ae_models, encoder_only=False):
         TD3Function.save(self, path)
@@ -90,16 +94,16 @@ class SRLTD3Agent(TD3Agent, SRLAgent):
                           memory_buffer, batch_size, expl_noise)
         SRLAgent.__init__(self, ae_models, reconstruct_freq=reconstruct_freq,
                           srl_loss=srl_loss, priors=priors, encoder_only=encoder_only)
+        self.approximator.fuse_encoder2critic()
 
     def update_critic(self, sampled_data, weight=None):
-        critic_loss, z = self.approximator.compute_critic_loss(
+        critic_loss = self.approximator.compute_critic_loss(
             sampled_data, self.discount_factor, weight=weight)
-
-        z_l2 = latent_l2(z)
-        loss_z = 0.1 * z_l2
+        z_l2 = latent_l2(self.approximator.compute_z(sampled_data[0]))
+        loss_z = z_l2 * self.approximator.decoder_latent_lambda
         summary_scalar('Loss/Encoder/Critic/L2', z_l2.item())
 
-        self.approximator.update_critic(critic_loss + z_l2)
+        self.approximator.update_critic(critic_loss + loss_z)
 
     def update(self, step):
         TD3Agent.update(self, step)

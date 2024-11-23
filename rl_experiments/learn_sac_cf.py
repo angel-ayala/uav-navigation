@@ -33,9 +33,9 @@ from learn_cf import args2ae_model
 
 def parse_agent_args(parser):
     arg_agent = parser.add_argument_group('Agent')
-    arg_agent.add_argument("--critic-lr", type=float, default=3e-4,
+    arg_agent.add_argument("--critic-lr", type=float, default=1e-4,
                            help='Critic function Adam learning rate.')
-    arg_agent.add_argument("--actor-lr", type=float, default=3e-4,
+    arg_agent.add_argument("--actor-lr", type=float, default=1e-4,
                            help='Actor function Adam learning rate.')
     arg_agent.add_argument("--critic-tau", type=float, default=0.005,
                            help='Soft target update \tau.')

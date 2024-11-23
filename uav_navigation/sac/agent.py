@@ -86,10 +86,13 @@ class SACFunction(GenericFunction):
     def alpha(self):
         return self.log_alpha.exp()
 
+    def forward_actor(self, observation):
+        return self.actor(observation)
+
     def action_inference(self, obs, sample=False):
         # if self.preprocess:
         #     obs = self.preprocess(obs)
-        dist = self.actor(obs)
+        dist = self.forward_actor(obs)
         action = dist.sample() if sample else dist.mean
         action = action.clamp(*self.action_range)
         assert action.ndim == 2 and action.shape[0] == 1
@@ -105,7 +108,7 @@ class SACFunction(GenericFunction):
         obs, action, reward, next_obs, done = sampled_data
 
         with torch.no_grad():
-            dist = self.actor(next_obs)
+            dist = self.forward_actor(next_obs)
             next_action = dist.sample()
             log_prob = dist.log_prob(next_action).sum(-1, keepdim=True)
             target_Q1, target_Q2 = self.critic_target(next_obs, next_action)
@@ -147,8 +150,7 @@ class SACFunction(GenericFunction):
         self.critic_optimizer.step()
 
     def update_actor_and_alpha(self, obs, weight=None):
-        # detach encoder, so we don't update it with the actor loss
-        dist = self.actor(obs)
+        dist = self.forward_actor(obs)
         action = dist.rsample()
         log_prob = dist.log_prob(action).sum(-1, keepdim=True)
         actor_Q1, actor_Q2 = self.critic(obs, action)

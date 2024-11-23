@@ -68,8 +68,14 @@ class TD3Function(GenericFunction):
         self.noise_clip *= self.action_range[1]
         self.policy_freq = policy_freq
 
+    def forward_actor(self, observation):
+        return self.actor(observation)
+
+    def forward_actor_target(self, observation):
+        return self.actor_target(observation)
+
     def action_inference(self, obs):
-        return self.actor(obs).cpu().data.numpy().flatten()
+        return self.forward_actor(obs).cpu().data.numpy().flatten()
 
     def sample_action(self, obs, expl_noise=0.1):
         # TODO: evaluation should have expl_noise=0
@@ -99,7 +105,7 @@ class TD3Function(GenericFunction):
             noise = (torch.randn_like(action) * self.policy_noise
                      ).clamp(-self.noise_clip, self.noise_clip)
 
-            next_action = (self.actor_target(next_state) + noise
+            next_action = (self.forward_actor_target(next_state) + noise
                            ).clamp(*self.action_range)
 
             # Compute the target Q value
@@ -123,7 +129,7 @@ class TD3Function(GenericFunction):
 
     def compute_actor_loss(self, state):
         # Compute actor losse
-        actor_loss = -self.critic.Q1(state, self.actor(state)).mean()
+        actor_loss = -self.critic.Q1(state, self.forward_actor(state)).mean()
         summary_scalar('Loss/Actor', actor_loss.item())
         return actor_loss
 

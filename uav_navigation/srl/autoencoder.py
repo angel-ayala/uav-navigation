@@ -57,15 +57,16 @@ def instance_autoencoder(ae_type, ae_params):
 
 
 def obs_reconstruction_loss(true_obs, rec_obs):
+    len_stack = true_obs.shape[1]
     if len(true_obs.shape) == 3:
         # de-stack
-        true_obs, _ = destack(true_obs, len_hist=3, is_rgb=False)
+        true_obs, _ = destack(true_obs, len_hist=len_stack, is_rgb=False)
 
     if len(true_obs.shape) == 4:
         # preprocess images to be in [-0.5, 0.5] range
         true_obs = preprocess_obs(true_obs)
         # de-stack
-        true_obs, _ = destack(true_obs, len_hist=3, is_rgb=True)
+        true_obs, _ = destack(true_obs, len_hist=len_stack // 3, is_rgb=True)
 
     output_obs = rec_obs.reshape(true_obs.shape)
 

@@ -4,9 +4,6 @@
 Created on Mon Nov 27 18:19:08 2023
 
 @author: Angel Ayala
-Based on:
-"Improving Sample Efficiency in Model-Free Reinforcement Learning from Images"
-https://arxiv.org/abs/1910.01741
 """
 import torch
 from torch import nn
@@ -73,15 +70,19 @@ def imu2pose_model(imu_shape, pos_shape, hidden_dim, latent_dim,
     return encoder, (decoder1, decoder2)
 
 
-class QNetworkWrapper(nn.Module):
-    def __init__(self, q_network, encoder_fn):
-        super(QNetworkWrapper, self).__init__()
-        self.encoder = encoder_fn
-        self.q_network = q_network
+class EncoderWrapper(nn.Module):
+    def __init__(self, function, encoder, detach_encoder=True):
+        super(EncoderWrapper, self).__init__()
+        self.function = function
+        self.encoder = encoder
+        self.detach = detach_encoder
 
-    def forward(self, obs):
-        z = self.encoder(obs, detach=True)
-        q = self.q_network(z)
+    def forward(self, obs, action=None):
+        z = self.encoder(obs, detach=self.detach)
+        if action is not None:
+            q = self.function(z, action)
+        else:
+            q = self.function(z)
         return q
 
 

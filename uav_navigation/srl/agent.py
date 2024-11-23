@@ -20,7 +20,7 @@ from .priors import NorthBelief
 from .priors import PositionBelief
 from .priors import OrientationBelief
 from .priors import DistanceBelief
-from .net import QNetworkWrapper
+from .net import EncoderWrapper
 
 
 def target_pos2dist(obs_1d):
@@ -74,7 +74,7 @@ class SRLFunction:
                                  ae_params['decoder_weight_decay'])
         self.models.append(ae_model)
 
-    def compute_z(self, observations, latent_types=None):
+    def compute_z(self, observations, latent_types=None, detach=True):
         z_hat = list()
         # obs_2d, obs_1d = self.format_obs(observations)
         if self.is_multimodal:
@@ -87,9 +87,9 @@ class SRLFunction:
         for m in self.models:
             if latent_types is None or m.type in latent_types:
                 if 'RGB' in m.type:
-                    z = m.encode_obs(obs_2d.to(self.device), detach=True)
+                    z = m.encode_obs(obs_2d.to(self.device), detach=detach)
                 if 'Vector' in m.type:
-                    z = m.encode_obs(obs_1d.to(self.device), detach=True)
+                    z = m.encode_obs(obs_1d.to(self.device), detach=detach)
                 if z.dim() == 1:
                     z = z.unsqueeze(0)
                 z_hat.append(z)
@@ -268,10 +268,10 @@ class SRLQFunction(QFunction, SRLFunction):
         # fuse encoder with Q-network function
         q_network = copy.deepcopy(self.q_network)
         encoder = copy.deepcopy(self.models[0].encoder[0])
-        self.q_network = QNetworkWrapper(q_network, encoder).to(self.device)
+        self.q_network = EncoderWrapper(q_network, encoder).to(self.device)
         # fuse encoder with  Q-network target function
         target_q_network = copy.deepcopy(self.target_q_network)
-        self.target_q_network = QNetworkWrapper(
+        self.target_q_network = EncoderWrapper(
             target_q_network, encoder).to(self.device)
         # Initialize target network with same Q-network parameters
         tau_value = copy.deepcopy(self.tau)

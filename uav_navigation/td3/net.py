@@ -11,6 +11,7 @@ import torch.nn as nn
 
 from uav_navigation.net import Conv1dMLP
 from uav_navigation.net import weight_init
+from uav_navigation.srl.net import EncoderWrapper
 
 
 class Actor(Conv1dMLP):
@@ -59,3 +60,14 @@ class Critic(nn.Module):
             action = action.repeat([1, state.shape[1], 1])
         sa = torch.cat([state, action], state.dim() - 1)
         return self.q1_network(sa)
+
+
+class TD3EncoderWrapper(EncoderWrapper):
+    def __init__(self, function, encoder, detach_encoder=True):
+        super(TD3EncoderWrapper, self).__init__(function, encoder,
+                                                detach_encoder)
+
+    def Q1(self, obs, action):
+        z = self.encoder(obs, detach=self.detach)
+        q = self.function.Q1(z, action)
+        return q
