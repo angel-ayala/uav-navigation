@@ -73,8 +73,8 @@ def imu2pose_model(imu_shape, pos_shape, hidden_dim, latent_dim,
 class EncoderWrapper(nn.Module):
     def __init__(self, function, encoder, detach_encoder=True):
         super(EncoderWrapper, self).__init__()
-        self.function = function
         self.encoder = encoder
+        self.function = function
         self.detach = detach_encoder
 
     def forward(self, obs, action=None):

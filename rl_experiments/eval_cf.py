@@ -63,7 +63,8 @@ def parse_args():
     return args
 
 
-def iterate_agents_evaluation(agent_class, agent_params, agent_paths, env,
+def iterate_agents_evaluation(agent_paths, agent_class, agent_params,
+                              approximator, approximator_params, env,
                               target_pos, eval_steps, episode, logpath,
                               log_params, record_video=False):
     summary_create(logpath.parent, logpath.name)
@@ -75,6 +76,9 @@ def iterate_agents_evaluation(agent_class, agent_params, agent_paths, env,
         if episode > 0 and log_ep != episode:
             continue
         print('Loading', agent_name[:12])
+        # Instantiate an init evaluation
+        agent_params.update(
+            dict(approximator=approximator(**approximator_params)))
         agent = agent_class(**agent_params)
         agent.load(agent_path.parent / agent_name[:12])
         store_callback = StoreStepData(
@@ -142,12 +146,10 @@ def run_evaluation(seed_val, logpath, episode):
     print('action_shape', agent_params['action_shape'])
 
     # Instantiate an init evaluation
-    agent_params.update(
-        dict(approximator=q_approximator(**approximator_params)))
-
     eval_logpath = logpath / 'eval'
     log_params = {'n_sensors': 4}
-    iterate_agents_evaluation(agent_class, agent_params, agent_paths, env,
+    iterate_agents_evaluation(agent_paths, agent_class, agent_params,
+                              q_approximator, approximator_params, env,
                               target_pos, args.eval_steps, episode,
                               eval_logpath, log_params, record_video=args.record)
 

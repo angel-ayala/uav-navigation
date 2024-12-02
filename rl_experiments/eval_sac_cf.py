@@ -70,14 +70,12 @@ def run_evaluation(seed_val, logpath, episode):
     print('action_shape', agent_params['action_shape'])
 
     # Instantiate an init evaluation
-    agent_params.update(
-        dict(approximator=policy(**approximator_params)))
-
     eval_logpath = logpath / 'eval'
     log_params = {'n_sensors': 4}
-    iterate_agents_evaluation(agent_class, agent_params, agent_paths, env,
-                              target_pos, args.eval_steps, episode,
-                              eval_logpath, log_params, record_video=args.record)
+    iterate_agents_evaluation(agent_paths, agent_class, agent_params, policy,
+                              approximator_params, env, target_pos,
+                              args.eval_steps, episode, eval_logpath,
+                              log_params, record_video=args.record)
 
 
 if __name__ == '__main__':
