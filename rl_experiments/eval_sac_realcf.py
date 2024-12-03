@@ -72,7 +72,8 @@ def run_evaluation(seed_val, logpath, episode):
         print('action_shape', agent_params['action_shape'])
 
         eval_logpath = logpath / 'eval_real'
-        log_params = {'n_sensors': 0, 'extra_info': False}
+        log_params = {'n_sensors': 0, 'extra_info': False,
+                      'other_cols': ['battery_volts']}
         iterate_agents_evaluation(agent_paths, agent_class, agent_params,
                                   policy, approximator_params, env,
                                   target_pos, args.eval_steps, episode,
