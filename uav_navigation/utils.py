@@ -210,8 +210,12 @@ def evaluate_agent(agent, env, eval_steps, target_quadrant=2, step_callback=None
                      f"R: {ep_reward:.4f}\tS: {ep_steps}\n")
     sys.stdout.flush()
 
-    summary_scalar(f"Evaluation/EpRewardQ{target_quadrant:02d}", ep_reward)
-    summary_scalar(f"Evaluation/EpNumberStepsQ{target_quadrant:02d}", ep_steps)
+    if isinstance(target_quadrant, (int, np.integer)):
+        summary_scalar(f"Evaluation/EpRewardQ{target_quadrant:02d}", ep_reward)
+        summary_scalar(f"Evaluation/EpNumberStepsQ{target_quadrant:02d}", ep_steps)
+    else:
+        summary_scalar("Evaluation/EpRewardRandomPos", ep_reward)
+        summary_scalar("Evaluation/EpNumberStepsRandomPos", ep_steps)
 
     return ep_reward, ep_steps, elapsed_time
 

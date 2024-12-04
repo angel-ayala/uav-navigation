@@ -28,6 +28,12 @@ from learn_cf import instance_env
 from learn_cf import wrap_env
 
 
+def list_of_targets(arg):
+    if 'random' in arg or 'sample' in arg:
+        return arg
+    return list_of_int(args)
+
+
 def parse_args():
     parser = argparse.ArgumentParser()    # misc
     parser.add_argument('--logspath', type=str,
@@ -54,7 +60,7 @@ def parse_args():
                          help='Minimum height distance to begin the mission.')
     arg_env.add_argument("--altitude-limits", type=list_of_float,
                          default=[0.25, 2.], help='Vertical flight limits.')
-    arg_env.add_argument("--target-pos", type=list_of_int, default=None,
+    arg_env.add_argument("--target-pos", type=list_of_targets, default=None,
                          help='Cuadrant number for target position.')
     arg_env.add_argument("--target-dim", type=list_of_float, default=[0.05, 0.02],
                          help="Target's dimension size.")
@@ -63,11 +69,38 @@ def parse_args():
     return args
 
 
+def args2params(args, env_params):
+    if not args.load_config:
+        env_params['time_limit_seconds'] = args.time_limit
+        env_params['frame_skip'] = args.frame_skip
+        env_params['goal_threshold'] = args.goal_threshold
+        env_params['init_altitude'] = args.init_altitude
+        env_params['altitude_limits'] = args.altitude_limits
+        env_params['target_dim'] = args.target_dim
+
+    return env_params
+
+
+def args2target(env, arg_tpos):
+    target_pos = arg_tpos
+    if arg_tpos is None:
+        target_pos = list(range(len(env.quadrants)))
+    elif 'sample' in arg_tpos:
+        target_pos = np.random.choice(range(len(env.quadrants)),
+                                      int(target_pos.replace('sample-', '')),
+                                      replace=False)
+    elif arg_tpos == 'random':
+        target_pos = [env.vtarget.get_random_position(env.flight_area)]
+    return target_pos
+
+
 def iterate_agents_evaluation(agent_paths, agent_class, agent_params,
                               approximator, approximator_params, env,
                               target_pos, eval_steps, episode, logpath,
                               log_params, record_video=False):
     summary_create(logpath.parent, logpath.name)
+    # Target position for evaluation
+    target_pos = args2target(env, target_pos)
     # Video recording callback
     vidcb = VideoCallback(logpath / "videos", env) if record_video else None
     for agent_path in agent_paths:
@@ -95,36 +128,24 @@ def iterate_agents_evaluation(agent_paths, agent_class, agent_params,
                 vidcb.stop_recording()
 
 
-def run_evaluation(seed_val, logpath, episode):
-    torch.manual_seed(seed_val)
-    np.random.seed(seed_val)
+def run_evaluation(args):
+    torch.manual_seed(args.seed)
+    np.random.seed(args.seed)
 
     # Define constants
-    logpath = Path(logpath)
+    logpath = Path(args.logspath)
     agent_paths = list(logpath.glob('**/agent_ep_*_q*'))
     agent_paths.sort()
 
     # Environment args
     environment_name = 'webots_drone:webots_drone/CrazyflieEnvDiscrete-v0'
     env_params = load_json_dict(logpath / 'args_environment.json')
-
-    target_pos = args.target_pos
-
-    if not args.load_config:
-        env_params['time_limit_seconds'] = args.time_limit
-        env_params['frame_skip'] = args.frame_skip
-        env_params['goal_threshold'] = args.goal_threshold
-        env_params['init_altitude'] = args.init_altitude
-        env_params['altitude_limits'] = args.altitude_limits
-        env_params['target_dim'] = args.target_dim
+    env_params = args2params(args, env_params)
 
     # Create the environment
     env, _ = instance_env(env_params, name=environment_name)
     # Observation preprocessing
     env, _ = wrap_env(env, env_params)
-
-    if target_pos is None:
-        target_pos = list(range(len(env.quadrants)))
 
     # Agent params
     agent_params = load_json_dict(logpath / 'args_agent.json')
@@ -150,10 +171,9 @@ def run_evaluation(seed_val, logpath, episode):
     log_params = {'n_sensors': 4}
     iterate_agents_evaluation(agent_paths, agent_class, agent_params,
                               q_approximator, approximator_params, env,
-                              target_pos, args.eval_steps, episode,
+                              args.target_pos, args.eval_steps, args.episode,
                               eval_logpath, log_params, record_video=args.record)
 
 
 if __name__ == '__main__':
-    args = parse_args()
-    run_evaluation(args.seed, args.logspath, args.episode)
+    run_evaluation(parse_args())
