@@ -112,11 +112,15 @@ class SRLSACAgent(SACAgent, SRLAgent):
     def update_critic(self, sampled_data, weight=None):
         critic_loss = self.approximator.compute_critic_loss(
             sampled_data, self.discount_factor, weight=weight)
-        z_l2 = latent_l2(self.approximator.compute_z(sampled_data[0]))
-        loss_z = z_l2 * self.approximator.decoder_latent_lambda
-        summary_scalar('Loss/Encoder/Critic/L2', z_l2.item())
 
-        self.approximator.update_critic(critic_loss + loss_z)
+        if "SPR" not in self.approximator.models[0].type:
+            z_l2 = latent_l2(self.approximator.compute_z(sampled_data[0]))
+            loss_z = z_l2 * self.approximator.decoder_latent_lambda
+            summary_scalar('Loss/Encoder/Critic/L2', z_l2.item())
+
+            self.approximator.update_critic(critic_loss + loss_z)
+        else:
+            self.approximator.update_critic(critic_loss)
 
     def update(self, step):
         SACAgent.update(self, step)

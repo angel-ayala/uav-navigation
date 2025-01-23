@@ -24,6 +24,8 @@ from .net import VectorEncoder
 from .net import VectorDecoder
 from .net import VectorDiffDecoder
 from .net import VectorMDPEncoder
+from .net import VectorSPREncoder
+from .net import VectorSPRDecoder
 # from .net import adabelief_optimizer
 from ..logger import log_image_batch
 # from .net import imu2pose_model
@@ -45,6 +47,8 @@ def instance_autoencoder(ae_type, ae_params):
         ae_model = VectorTargetDistModel(ae_params)
     if ae_type == 'VectorDifference':
         ae_model = VectorDifferenceModel(ae_params)
+    if ae_type == 'VectorSPR':
+        ae_model = VectorSPRModel(ae_params)
     if ae_type == 'VectorATC':
         ae_model = VectorATCModel(ae_params)
     if ae_type == 'ATC':
@@ -410,6 +414,37 @@ class VectorATCModel(AEModel):
         # nceloss = self.loss(z_t, z_t1_pos, z_t1_neg)
         summary_scalar(f'Loss/Contrastive/{self.type}/InfoNCE', nceloss.item())
         return nceloss * 1e-4
+
+
+class VectorSPRModel(AEModel):
+    def __init__(self, model_params):
+        super(VectorSPRModel, self).__init__('VectorSPR')
+        vector_encoder = VectorSPREncoder(model_params['vector_shape'],
+                                          model_params['latent_dim'],
+                                          model_params['hidden_dim'],
+                                          num_layers=model_params['num_layers'])
+        self.encoder.append(vector_encoder)
+        if not model_params['encoder_only']:
+            vector_decoder = VectorSPRDecoder(model_params['action_shape'],
+                                              model_params['latent_dim'])
+            self.decoder.append(vector_decoder)
+
+    def projection(self, z):
+        return self.encoder[0].project(z)
+
+    def compute_regression_loss(self, z_t, z_t1):
+        """Compute Similarity loss function.
+
+        based on:
+            - https://arxiv.org/pdf/2007.05929
+            - https://arxiv.org/pdf/2006.07733
+        """
+        x = F.normalize(z_t, dim=1)
+        y = F.normalize(z_t1, dim=1)
+        loss = 2 - 2 * (x * y).sum(dim=-1)
+        loss = loss.mean()
+        summary_scalar(f'Loss/Contrastive/{self.type}/BYOL', loss.item())
+        return loss
 
 
 class ATCModel(AEModel):

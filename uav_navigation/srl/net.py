@@ -152,6 +152,37 @@ class VectorMDPEncoder(VectorEncoder):
         return h_fc
 
 
+class VectorSPREncoder(VectorEncoder):
+    def __init__(self, state_shape, latent_dim, hidden_dim, num_layers=2):
+        super(VectorSPREncoder, self).__init__(
+            state_shape, latent_dim, hidden_dim, num_layers)
+        self.prj = nn.Linear(latent_dim, latent_dim)
+
+    def project(self, z, detach=False):
+        h_fc = self.prj(z)
+        return h_fc
+
+
+class VectorSPRDecoder(nn.Module):
+    """VectorSPRDecoder for reconstrucntion function."""
+
+    def __init__(self, action_shape, latent_dim):
+        super(VectorSPRDecoder, self).__init__()
+        self.pred = nn.Linear(latent_dim, latent_dim)
+        self.tran = nn.Linear(latent_dim + action_shape[-1], latent_dim)
+
+    def predict(self, z_prj):
+        h_fc = self.pred(z_prj)
+        return h_fc
+
+    def transition(self, z, action):
+        h_fc = self.tran(torch.cat([z, action], dim=1))
+        return h_fc
+    
+    def forward(self, z):
+        return self.predict(z)
+
+
 class ChannelAttention(nn.Module):
     def __init__(self, num_filters, reduction_ratio=8):
         super(ChannelAttention, self).__init__()

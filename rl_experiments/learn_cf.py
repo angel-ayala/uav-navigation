@@ -170,6 +170,8 @@ def parse_srl_args(parser):
                          help='Whether if use the Augmented Temporal Contrast model.')
     arg_srl.add_argument("--model-contrastive", action='store_true',
                          help='Whether if use the VectorContrastive model.')
+    arg_srl.add_argument("--model-spr", action='store_true',
+                         help='Whether if use the VectorSPR model.')
     arg_srl.add_argument("--use-priors", action='store_true',
                          help='Whether if use the Prior models.')
     arg_srl.add_argument("--use-srl-loss", action='store_true',
@@ -373,6 +375,15 @@ def args2ae_model(args, env_params):
                                              encoder_lr=args.encoder_lr,
                                              decoder_lr=args.decoder_lr,
                                              decoder_weight_decay=args.decoder_weight_decay)
+    if args.model_spr:
+        ae_models['VectorSPR'] = dict(vector_shape=vector_shape,
+                                      action_shape=env_params['action_shape'],
+                                      hidden_dim=args.hidden_dim,
+                                      latent_dim=args.latent_dim,
+                                      num_layers=args.num_layers,
+                                      encoder_lr=args.encoder_lr,
+                                      decoder_lr=args.decoder_lr,
+                                      decoder_weight_decay=args.decoder_weight_decay)
     if args.model_atc:
         assert env_params['is_pixels'], 'ATC model requires is_pixels flag.'
         ae_models['ATC'] = dict(image_shape=image_shape,

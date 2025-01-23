@@ -107,6 +107,7 @@ class SRLFunction:
             obs_2d_t1_augm = self.format_obs(obs_t1, augment=True)
         else:
             obs_1d = self.format_obs(obs, augment=False)
+            obs_1d_t1 = self.format_obs(obs_t1, augment=False)
             obs_1d_augm = self.format_obs(obs, augment=True)
             obs_1d_t1_augm = self.format_obs(obs_t1, augment=True)
 
@@ -120,7 +121,21 @@ class SRLFunction:
                     loss = ae_model.compute_reconstruction_loss(obs_2d, obs_2d_augm, self.decoder_latent_lambda, pixel_obs_log=True)
                 total_loss.append(loss)
             if "Vector" in ae_model.type:
-                if "ATC" in ae_model.type:
+                if "SPR" in ae_model.type:
+                    # z_t = self.critic.encoder(obs_1d)
+                    z_t = ae_model.encode_obs(obs_1d)
+                    z_hat = ae_model.decoder[0].transition(z_t, actions)
+                    # g0_out = self.critic.encoder.project(z_hat)
+                    g0_out = ae_model.encoder[0].project(z_hat)
+                    y_hat = ae_model.decoder[0].predict(g0_out)
+
+                    with torch.no_grad():
+                        z_t1 = self.critic_target.encoder(obs_1d_t1)
+                        y_curl = self.critic_target.encoder.project(z_t1)
+
+                    loss = ae_model.compute_regression_loss(y_hat, y_curl)
+                    total_loss.append(loss)
+                elif "ATC" in ae_model.type:
                     # obs_1d_augm_norm = self.normalize_vector(obs_1d_augm)
                     # obs_1d_t1_augm = self.normalize_vector(obs_1d_t1_augm)
                     loss = ae_model.compute_contrastive_loss(obs_1d_augm, obs_1d_t1_augm, rewards)
@@ -159,11 +174,13 @@ class SRLFunction:
                     # print('final obs_1d', obs_1d.shape, obs_1d[0])
                 else:
                     obs_1d = self.normalize_vector(obs_1d)
-                # supress outliers
-                obs_1d[obs_1d > 1.] = 1.
-                obs_1d[obs_1d < -1.] = -1.
-                loss = ae_model.compute_reconstruction_loss(obs_1d, obs_1d_augm, self.decoder_latent_lambda)
-                total_loss.append(loss)
+
+                if "SPR" not in ae_model.type:
+                    # supress outliers
+                    obs_1d[obs_1d > 1.] = 1.
+                    obs_1d[obs_1d < -1.] = -1.
+                    loss = ae_model.compute_reconstruction_loss(obs_1d, obs_1d_augm, self.decoder_latent_lambda)
+                    total_loss.append(loss)
         tloss = torch.sum(torch.stack(total_loss))
         # summary_scalar("Loss/AutoEncoders", tloss.item())
         return tloss

@@ -105,7 +105,7 @@ def iterate_agents_evaluation(agent_paths, agent_class, agent_params,
     vidcb = VideoCallback(logpath / "videos", env) if record_video else None
     for agent_path in agent_paths:
         agent_name = agent_path.name
-        log_ep = int(str(agent_name).replace('agent_ep_', '').split("_")[0])
+        log_ep = int(str(agent_name).replace('agent_ep_', '').split("_")[0]) - 1
         if episode > 0 and log_ep != episode:
             continue
         print('Loading', agent_name[:12])
