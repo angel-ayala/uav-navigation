@@ -51,19 +51,38 @@ class SRLTD3Function(TD3Function, SRLFunction):
     def fuse_encoder2critic(self):
         # Temporal copy
         critic = copy.deepcopy(self.critic)
-        encoder = copy.deepcopy(self.models[0].encoder[0])
-        # Critic
-        self.critic = TD3EncoderWrapper(critic, encoder, detach_encoder=False)
+        # Critic with shared autoencoder weights
+        self.critic = TD3EncoderWrapper(critic, self.models[0].encoder[0],
+                                        detach_encoder=False)
         self.critic_target = copy.deepcopy(self.critic)
-        # share autoencoder weights
-        self.critic.encoder.copy_weights_from(self.models[0].encoder[0])
         # optimizers
         critic_lr = self.critic_optimizer.param_groups[0]['lr']
         self.critic_optimizer = torch.optim.Adam(
             self.critic.parameters(), lr=critic_lr)
 
     def forward_actor(self, observation):
-        return self.actor(self.compute_z(observation).detach())
+        z = self.compute_z(observation, detach=False)
+        if 'SPR' in self.models[0].type:
+            z = self.critic.encoder.project(z)
+        return self.actor(z.detach())
+
+    def forward_critic(self, observation, action):
+        z = self.compute_z(observation, detach=False)
+        if 'SPR' in self.models[0].type:
+            z = self.critic.encoder.project(z)
+        return self.critic.function(z, action)
+
+    def forward_critic_target(self, observation, action):
+        z = self.critic_target.encoder(observation, detach=False)
+        if 'SPR' in self.models[0].type:
+            z = self.critic_target.encoder.project(z)
+        return self.critic_target.function(z, action)
+
+    def forward_critic_Q1(self, observation, action):
+        z = self.critic_target.encoder(observation, detach=False)
+        if 'SPR' in self.models[0].type:
+            z = self.critic_target.encoder.project(z)
+        return self.critic_target.function.Q1(z, action)
 
     def forward_actor_target(self, observation):
         return self.actor_target(self.compute_z(observation).detach())
@@ -99,11 +118,14 @@ class SRLTD3Agent(TD3Agent, SRLAgent):
     def update_critic(self, sampled_data, weight=None):
         critic_loss = self.approximator.compute_critic_loss(
             sampled_data, self.discount_factor, weight=weight)
-        z_l2 = latent_l2(self.approximator.compute_z(sampled_data[0]))
-        loss_z = z_l2 * self.approximator.decoder_latent_lambda
-        summary_scalar('Loss/Encoder/Critic/L2', z_l2.item())
+        if "SPR" not in self.approximator.models[0].type:
+            z_l2 = latent_l2(self.approximator.compute_z(sampled_data[0]))
+            loss_z = z_l2 * self.approximator.decoder_latent_lambda
+            summary_scalar('Loss/Encoder/Critic/L2', z_l2.item())
 
-        self.approximator.update_critic(critic_loss + loss_z)
+            self.approximator.update_critic(critic_loss + loss_z)
+        else:
+            self.approximator.update_critic(critic_loss)
 
     def update(self, step):
         TD3Agent.update(self, step)

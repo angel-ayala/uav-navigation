@@ -426,24 +426,32 @@ class VectorSPRModel(AEModel):
         self.encoder.append(vector_encoder)
         if not model_params['encoder_only']:
             vector_decoder = VectorSPRDecoder(model_params['action_shape'],
-                                              model_params['latent_dim'])
+                                              model_params['latent_dim'],
+                                              model_params['hidden_dim'],
+                                              num_layers=model_params['num_layers'])
             self.decoder.append(vector_decoder)
 
-    def projection(self, z):
-        return self.encoder[0].project(z)
+    def forward_y_hat(self, observation, action):
+        z_t = self.encoder[0](observation)
+        z_hat = self.decoder[0].transition(z_t, action)
+        g0_out = self.encoder[0].project(z_hat)
+        y_hat = self.decoder[0].predict(g0_out)
+        return y_hat
 
-    def compute_regression_loss(self, z_t, z_t1):
+    def compute_regression_loss(self, y_curl, y_hat):
         """Compute Similarity loss function.
 
         based on:
             - https://arxiv.org/pdf/2007.05929
             - https://arxiv.org/pdf/2006.07733
         """
-        x = F.normalize(z_t, dim=1)
-        y = F.normalize(z_t1, dim=1)
-        loss = 2 - 2 * (x * y).sum(dim=-1)
-        loss = loss.mean()
-        summary_scalar(f'Loss/Contrastive/{self.type}/BYOL', loss.item())
+        # https://github.com/mila-iqia/spr/blob/release/src/models.py
+        f_x1 = F.normalize(y_curl.float(), p=2., dim=-1, eps=1e-3)
+        f_x2 = F.normalize(y_hat.float(), p=2., dim=-1, eps=1e-3)
+        # Gradients of normalized L2 loss and cosine similiarity are proportional.
+        # See: https://stats.stackexchange.com/a/146279
+        loss = F.mse_loss(f_x1, f_x2, reduction="none").sum(-1).mean(0)
+        summary_scalar(f'Loss/Contrastive/{self.type}/NormL2', loss.item())
         return loss
 
 

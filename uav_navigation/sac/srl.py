@@ -67,19 +67,32 @@ class SRLSACFunction(SACFunction, SRLFunction):
     def fuse_encoder2critic(self):
         # Temporal copy
         critic = copy.deepcopy(self.critic)
-        encoder = copy.deepcopy(self.models[0].encoder[0])
-        # Critic
-        self.critic = EncoderWrapper(critic, encoder, detach_encoder=False)
+        # Critic with shared autoencoder weights
+        self.critic = EncoderWrapper(critic, self.models[0].encoder[0],
+                                     detach_encoder=False)
         self.critic_target = copy.deepcopy(self.critic)
-        # share autoencoder weights
-        self.critic.encoder.copy_weights_from(self.models[0].encoder[0])
         # optimizers
         critic_lr = self.critic_optimizer.param_groups[0]['lr']
         self.critic_optimizer = torch.optim.Adam(
             self.critic.parameters(), lr=critic_lr)
 
     def forward_actor(self, observation):
-        return self.actor(self.compute_z(observation).detach())
+        z = self.compute_z(observation, detach=False)
+        if 'SPR' in self.models[0].type:
+            z = self.critic.encoder.project(z)
+        return self.actor(z.detach())
+
+    def forward_critic(self, observation, action):
+        z = self.compute_z(observation, detach=False)
+        if 'SPR' in self.models[0].type:
+            z = self.critic.encoder.project(z)
+        return self.critic.function(z, action)
+
+    def forward_critic_target(self, observation, action):
+        z = self.critic_target.encoder(observation, detach=False)
+        if 'SPR' in self.models[0].type:
+            z = self.critic_target.encoder.project(z)
+        return self.critic_target.function(z, action)
 
     def save(self, path, ae_models, encoder_only=False):
         SACFunction.save(self, path)

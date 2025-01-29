@@ -114,32 +114,17 @@ class SRLFunction:
         total_loss = list()
         for ae_model in self.models:
             if "RGB" in ae_model.type:
-                if "ATC" in ae_model.type:
-                    loss = ae_model.compute_contrastive_loss(obs_2d_augm, obs_2d_t1_augm)
-                    ae_model.update_momentum_encoder(0.01)
-                else:
-                    loss = ae_model.compute_reconstruction_loss(obs_2d, obs_2d_augm, self.decoder_latent_lambda, pixel_obs_log=True)
+                loss = ae_model.compute_reconstruction_loss(obs_2d, obs_2d_augm, self.decoder_latent_lambda, pixel_obs_log=True)
                 total_loss.append(loss)
             if "Vector" in ae_model.type:
                 if "SPR" in ae_model.type:
-                    # z_t = self.critic.encoder(obs_1d)
-                    z_t = ae_model.encode_obs(obs_1d)
-                    z_hat = ae_model.decoder[0].transition(z_t, actions)
-                    # g0_out = self.critic.encoder.project(z_hat)
-                    g0_out = ae_model.encoder[0].project(z_hat)
-                    y_hat = ae_model.decoder[0].predict(g0_out)
+                    y_hat = ae_model.forward_y_hat(obs_1d, actions)
 
                     with torch.no_grad():
                         z_t1 = self.critic_target.encoder(obs_1d_t1)
                         y_curl = self.critic_target.encoder.project(z_t1)
 
-                    loss = ae_model.compute_regression_loss(y_hat, y_curl)
-                    total_loss.append(loss)
-                elif "ATC" in ae_model.type:
-                    # obs_1d_augm_norm = self.normalize_vector(obs_1d_augm)
-                    # obs_1d_t1_augm = self.normalize_vector(obs_1d_t1_augm)
-                    loss = ae_model.compute_contrastive_loss(obs_1d_augm, obs_1d_t1_augm, rewards)
-                    ae_model.update_momentum_encoder(0.01)
+                    loss = ae_model.compute_regression_loss(y_curl, y_hat)
                     total_loss.append(loss)
                 elif "TargetDist" in ae_model.type:
                     # compute target distances as reconstruction

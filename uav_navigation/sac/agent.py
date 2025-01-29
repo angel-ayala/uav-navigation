@@ -89,6 +89,12 @@ class SACFunction(GenericFunction):
     def forward_actor(self, observation):
         return self.actor(observation)
 
+    def forward_critic(self, observation, action):
+        return self.critic(observation, action)
+
+    def forward_critic_target(self, observation, action):
+        return self.critic_target(observation, action)
+
     def action_inference(self, obs, sample=False):
         # if self.preprocess:
         #     obs = self.preprocess(obs)
@@ -111,14 +117,14 @@ class SACFunction(GenericFunction):
             dist = self.forward_actor(next_obs)
             next_action = dist.sample()
             log_prob = dist.log_prob(next_action).sum(-1, keepdim=True)
-            target_Q1, target_Q2 = self.critic_target(next_obs, next_action)
+            target_Q1, target_Q2 = self.forward_critic_target(next_obs, next_action)
             target_V = torch.min(target_Q1, target_Q2) - self.alpha.detach() * log_prob
             target_Q = reward.unsqueeze(1) + ((1 - done).unsqueeze(1) * discount * target_V)
             # target_Q = target_Q.detach()
 
 
         # get current Q estimates
-        current_Q1, current_Q2 = self.critic(obs, action)
+        current_Q1, current_Q2 = self.forward_critic(obs, action)
         # if weight is not None:
         #     td_error = (F.mse_loss(current_Q1, target_Q, reduction='none') +
         #                 F.mse_loss(current_Q2, target_Q, reduction='none'))
@@ -153,7 +159,7 @@ class SACFunction(GenericFunction):
         dist = self.forward_actor(obs)
         action = dist.rsample()
         log_prob = dist.log_prob(action).sum(-1, keepdim=True)
-        actor_Q1, actor_Q2 = self.critic(obs, action)
+        actor_Q1, actor_Q2 = self.forward_critic(obs, action)
         actor_Q = torch.min(actor_Q1, actor_Q2)
         actor_loss = (self.alpha.detach() * log_prob - actor_Q).mean()
 

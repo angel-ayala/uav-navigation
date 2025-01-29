@@ -29,6 +29,7 @@ from learn_cf import parse_utils_args
 from learn_cf import instance_env
 from learn_cf import wrap_env
 from learn_cf import args2ae_model
+from learn_cf import create_log_path
 
 
 def parse_agent_args(parser):
@@ -157,19 +158,7 @@ if __name__ == '__main__':
     memory_params.update(dict(is_prioritized=args.memory_prioritized))
     agent_params.update(dict(memory_buffer=memory_params))
 
-    if args.logspath is None:
-        if env_params['is_multimodal']:
-            path_prefix = 'multimodal'
-        else:
-            path_prefix = 'pixels' if args.is_pixels else 'vector'
-        path_suffix = '-srl' if args.is_srl else ''
-        timestamp = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-        # Summary folder
-        outfolder = Path(f"logs_cf_{path_prefix}/sac{path_suffix}_{timestamp}")
-    else:
-        outfolder = Path(args.logspath)
-    agents_folder = outfolder / 'agents'
-    agents_folder.mkdir(parents=True)
+    outfolder, agents_folder = create_log_path(args, 'sac')
     print('Saving logs at:', outfolder)
 
     store_callback = StoreStepData(outfolder / 'history_training.csv', n_sensors=4)

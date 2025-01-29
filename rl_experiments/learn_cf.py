@@ -170,7 +170,7 @@ def parse_srl_args(parser):
                          help='Whether if use the Augmented Temporal Contrast model.')
     arg_srl.add_argument("--model-contrastive", action='store_true',
                          help='Whether if use the VectorContrastive model.')
-    arg_srl.add_argument("--model-spr", action='store_true',
+    arg_srl.add_argument("--model-vector-spr", action='store_true',
                          help='Whether if use the VectorSPR model.')
     arg_srl.add_argument("--use-priors", action='store_true',
                          help='Whether if use the Prior models.')
@@ -375,7 +375,7 @@ def args2ae_model(args, env_params):
                                              encoder_lr=args.encoder_lr,
                                              decoder_lr=args.decoder_lr,
                                              decoder_weight_decay=args.decoder_weight_decay)
-    if args.model_spr:
+    if args.model_vector_spr:
         ae_models['VectorSPR'] = dict(vector_shape=vector_shape,
                                       action_shape=env_params['action_shape'],
                                       hidden_dim=args.hidden_dim,
@@ -429,6 +429,32 @@ def args2priors(args, env_params):
                                      target_obs=['Vector'],
                                      learning_rate=1e-4)
     return agent_priors
+
+
+def create_log_path(args, algo):
+    if args.logspath is None:
+        if args.is_pixels and args.is_vector:
+            path_prefix = 'multi'
+        else:
+            path_prefix = 'pixels' if args.is_pixels else 'vector'
+        path_suffix = ''
+        if args.is_srl:
+            path_suffix += '-srl'
+        if args.model_vector_target_dist:
+            path_suffix += '-tdist'
+        if args.model_vector_spr:
+            path_suffix += '-spr'
+        if args.model_vector_difference:
+            path_suffix += '-diff'
+
+        timestamp = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+        # Summary folder
+        outfolder = Path(f"logs_cf_{path_prefix}/{algo}{path_suffix}_{timestamp}")
+    else:
+        outfolder = Path(args.logspath)
+    agents_folder = outfolder / 'agents'
+    agents_folder.mkdir(parents=True)
+    return outfolder, agents_folder
 
 
 if __name__ == '__main__':

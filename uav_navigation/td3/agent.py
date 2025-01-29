@@ -74,11 +74,19 @@ class TD3Function(GenericFunction):
     def forward_actor_target(self, observation):
         return self.actor_target(observation)
 
+    def forward_critic(self, observation, action):
+        return self.critic(observation, action)
+
+    def forward_critic_target(self, observation, action):
+        return self.critic_target(observation, action)
+
+    def forward_critic_Q1(self, observation, action):
+        return self.critic.Q1(observation, action)
+
     def action_inference(self, obs):
         return self.forward_actor(obs).cpu().data.numpy().flatten()
 
     def sample_action(self, obs, expl_noise=0.1):
-        # TODO: evaluation should have expl_noise=0
         max_action = self.action_range.cpu().numpy()
         action_noise = np.random.normal(0, max_action[1] * expl_noise)
         action = self.action_inference(obs) + action_noise
@@ -109,12 +117,12 @@ class TD3Function(GenericFunction):
                            ).clamp(*self.action_range)
 
             # Compute the target Q value
-            target_Q1, target_Q2 = self.critic_target(next_state, next_action)
+            target_Q1, target_Q2 = self.forward_critic_target(next_state, next_action)
             target_Q = torch.min(target_Q1, target_Q2)
             target_Q = reward.unsqueeze(1) + (1 - done.unsqueeze(1)) * discount * target_Q
 
         # Get current Q estimates
-        current_Q1, current_Q2 = self.critic(state, action)
+        current_Q1, current_Q2 = self.forward_critic(state, action)
 
         # Compute critic loss
         critic_loss = F.mse_loss(current_Q1, target_Q) + F.mse_loss(current_Q2, target_Q)
@@ -129,7 +137,7 @@ class TD3Function(GenericFunction):
 
     def compute_actor_loss(self, state):
         # Compute actor losse
-        actor_loss = -self.critic.Q1(state, self.forward_actor(state)).mean()
+        actor_loss = -self.forward_critic_Q1(state, self.forward_actor(state)).mean()
         summary_scalar('Loss/Actor', actor_loss.item())
         return actor_loss
 
