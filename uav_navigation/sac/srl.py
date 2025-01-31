@@ -67,9 +67,8 @@ class SRLSACFunction(SACFunction, SRLFunction):
     def fuse_encoder2critic(self):
         # Temporal copy
         critic = copy.deepcopy(self.critic)
-        # Critic with shared autoencoder weights
-        self.critic = EncoderWrapper(critic, self.models[0].encoder[0],
-                                     detach_encoder=False)
+        # Critic with online encoder
+        self.critic = EncoderWrapper(critic, self.models[0].encoder[0])
         self.critic_target = copy.deepcopy(self.critic)
         # optimizers
         critic_lr = self.critic_optimizer.param_groups[0]['lr']
@@ -77,13 +76,10 @@ class SRLSACFunction(SACFunction, SRLFunction):
             self.critic.parameters(), lr=critic_lr)
 
     def forward_actor(self, observation):
-        z = self.compute_z(observation, detach=False)
-        if 'SPR' in self.models[0].type:
-            z = self.critic.encoder.project(z)
-        return self.actor(z.detach())
+        return self.actor(self.compute_z(observation).detach())
 
     def forward_critic(self, observation, action):
-        z = self.compute_z(observation, detach=False)
+        z = self.critic.encoder(observation, detach=False)
         if 'SPR' in self.models[0].type:
             z = self.critic.encoder.project(z)
         return self.critic.function(z, action)
@@ -121,19 +117,6 @@ class SRLSACAgent(SACAgent, SRLAgent):
         SRLAgent.__init__(self, ae_models, reconstruct_freq=reconstruct_freq,
                           srl_loss=srl_loss, priors=priors, encoder_only=encoder_only)
         self.approximator.fuse_encoder2critic()
-
-    def update_critic(self, sampled_data, weight=None):
-        critic_loss = self.approximator.compute_critic_loss(
-            sampled_data, self.discount_factor, weight=weight)
-
-        if "SPR" not in self.approximator.models[0].type:
-            z_l2 = latent_l2(self.approximator.compute_z(sampled_data[0]))
-            loss_z = z_l2 * self.approximator.decoder_latent_lambda
-            summary_scalar('Loss/Encoder/Critic/L2', z_l2.item())
-
-            self.approximator.update_critic(critic_loss + loss_z)
-        else:
-            self.approximator.update_critic(critic_loss)
 
     def update(self, step):
         SACAgent.update(self, step)

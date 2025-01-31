@@ -61,13 +61,15 @@ class SRLTD3Function(TD3Function, SRLFunction):
             self.critic.parameters(), lr=critic_lr)
 
     def forward_actor(self, observation):
-        z = self.compute_z(observation, detach=False)
-        if 'SPR' in self.models[0].type:
-            z = self.critic.encoder.project(z)
-        return self.actor(z.detach())
+        return self.actor(self.compute_z(observation).detach())
+
+    def forward_actor_target(self, observation):
+        # return self.actor_target(self.compute_z(observation).detach())
+        return self.actor_target(
+            self.critic_target.encoder(observation).detach())
 
     def forward_critic(self, observation, action):
-        z = self.compute_z(observation, detach=False)
+        z = self.critic.encoder(observation, detach=False)
         if 'SPR' in self.models[0].type:
             z = self.critic.encoder.project(z)
         return self.critic.function(z, action)
@@ -83,9 +85,6 @@ class SRLTD3Function(TD3Function, SRLFunction):
         if 'SPR' in self.models[0].type:
             z = self.critic_target.encoder.project(z)
         return self.critic_target.function.Q1(z, action)
-
-    def forward_actor_target(self, observation):
-        return self.actor_target(self.compute_z(observation).detach())
 
     def save(self, path, ae_models, encoder_only=False):
         TD3Function.save(self, path)
@@ -114,18 +113,6 @@ class SRLTD3Agent(TD3Agent, SRLAgent):
         SRLAgent.__init__(self, ae_models, reconstruct_freq=reconstruct_freq,
                           srl_loss=srl_loss, priors=priors, encoder_only=encoder_only)
         self.approximator.fuse_encoder2critic()
-
-    def update_critic(self, sampled_data, weight=None):
-        critic_loss = self.approximator.compute_critic_loss(
-            sampled_data, self.discount_factor, weight=weight)
-        if "SPR" not in self.approximator.models[0].type:
-            z_l2 = latent_l2(self.approximator.compute_z(sampled_data[0]))
-            loss_z = z_l2 * self.approximator.decoder_latent_lambda
-            summary_scalar('Loss/Encoder/Critic/L2', z_l2.item())
-
-            self.approximator.update_critic(critic_loss + loss_z)
-        else:
-            self.approximator.update_critic(critic_loss)
 
     def update(self, step):
         TD3Agent.update(self, step)

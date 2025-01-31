@@ -71,14 +71,15 @@ def imu2pose_model(imu_shape, pos_shape, hidden_dim, latent_dim,
 
 
 class EncoderWrapper(nn.Module):
-    def __init__(self, function, encoder, detach_encoder=True):
+    def __init__(self, function, encoder):
         super(EncoderWrapper, self).__init__()
         self.encoder = encoder
         self.function = function
-        self.detach = detach_encoder
 
-    def forward(self, obs, action=None):
-        z = self.encoder(obs, detach=self.detach)
+    def forward(self, obs, action=None, detach_encoder=False):
+        z = self.encoder(obs)
+        if detach_encoder:
+            z = z.detach()
         if action is not None:
             q = self.function(z, action)
         else:
@@ -97,7 +98,7 @@ class VectorEncoder(Conv1dMLP):
     def forward(self, obs, detach=False):
         z = torch.relu(super().forward(obs))
         if detach:
-            z.detach()
+            z = z.detach()
         out = self.ln(self.fc(z))
         return torch.tanh(out)
 
