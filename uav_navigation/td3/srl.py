@@ -14,6 +14,7 @@ from uav_navigation.srl.agent import SRLAgent
 from uav_navigation.srl.agent import SRLFunction
 from uav_navigation.srl.autoencoder import latent_l2
 from uav_navigation.logger import summary_scalar
+from uav_navigation.utils import soft_update_params
 
 from .net import TD3EncoderWrapper
 
@@ -32,6 +33,7 @@ class SRLTD3Function(TD3Function, SRLFunction):
                  is_pixels=False,
                  is_multimodal=False,
                  use_augmentation=True,
+                 encoder_tau=0.995,
                  decoder_latent_lambda=1e-6):
         TD3Function.__init__(self, latent_dim, action_shape, obs_space,
                              action_range=action_range,
@@ -47,44 +49,39 @@ class SRLTD3Function(TD3Function, SRLFunction):
                              is_multimodal=is_multimodal,
                              use_augmentation=use_augmentation)
         SRLFunction.__init__(self, decoder_latent_lambda)
+        self.encoder_tau = encoder_tau
 
-    def fuse_encoder2critic(self):
-        # Temporal copy
-        critic = copy.deepcopy(self.critic)
-        # Critic with shared autoencoder weights
-        self.critic = TD3EncoderWrapper(critic, self.models[0].encoder[0],
-                                        detach_encoder=False)
-        self.critic_target = copy.deepcopy(self.critic)
-        # optimizers
-        critic_lr = self.critic_optimizer.param_groups[0]['lr']
-        self.critic_optimizer = torch.optim.Adam(
-            self.critic.parameters(), lr=critic_lr)
+    def init_models(self):
+        self.target_encoder = copy.deepcopy(self.models[0].encoder[0])
+        # TODO: test with a linear layer between z (latent vector) and actor/critic functions (EncoderInterface)
 
-    def forward_actor(self, observation):
-        return self.actor(self.compute_z(observation).detach())
+    def action_inference(self, obs):
+        obs_z = self.compute_z(obs).detach()
+        return self.actor(obs_z).cpu().data.numpy().flatten()
 
-    def forward_actor_target(self, observation):
-        # return self.actor_target(self.compute_z(observation).detach())
-        return self.actor_target(
-            self.critic_target.encoder(observation).detach())
+    def update_critic_target(self):
+        super().update_critic_target()
+        # Soft update the target network
+        soft_update_params(net=self.models[0].encoder[0],
+                           target_net=self.target_encoder,
+                           tau=self.encoder_tau)
 
-    def forward_critic(self, observation, action):
-        z = self.critic.encoder(observation, detach=False)
+    def compute_critic_loss(self, sampled_data, discount, weight=None):
+        obs, action, reward, next_obs, done = sampled_data
+        obs_z = self.compute_z(obs, detach=False)
         if 'SPR' in self.models[0].type:
-            z = self.critic.encoder.project(z)
-        return self.critic.function(z, action)
+            obs_z = self.models[0].encoder[0].project(obs_z)
 
-    def forward_critic_target(self, observation, action):
-        z = self.critic_target.encoder(observation, detach=False)
+        next_obs_z = self.target_encoder(next_obs)
         if 'SPR' in self.models[0].type:
-            z = self.critic_target.encoder.project(z)
-        return self.critic_target.function(z, action)
+            obs_z = self.target_encoder.project(obs_z)
 
-    def forward_critic_Q1(self, observation, action):
-        z = self.critic_target.encoder(observation, detach=False)
-        if 'SPR' in self.models[0].type:
-            z = self.critic_target.encoder.project(z)
-        return self.critic_target.function.Q1(z, action)
+        return super().compute_critic_loss(
+            [obs_z, action, reward, next_obs_z, done], discount, weight)
+
+    def compute_actor_loss(self, obs):
+        obs_z = self.compute_z(obs, detach=True)
+        return super().compute_actor_loss(obs_z)
 
     def save(self, path, ae_models, encoder_only=False):
         TD3Function.save(self, path)
@@ -112,7 +109,7 @@ class SRLTD3Agent(TD3Agent, SRLAgent):
                           memory_buffer, batch_size, expl_noise)
         SRLAgent.__init__(self, ae_models, reconstruct_freq=reconstruct_freq,
                           srl_loss=srl_loss, priors=priors, encoder_only=encoder_only)
-        self.approximator.fuse_encoder2critic()
+        self.approximator.init_models()
 
     def update(self, step):
         TD3Agent.update(self, step)

@@ -102,12 +102,10 @@ class AEModel:
         if type(decoders_lr) is not list:
             decoders_lr = [decoders_lr]
         self.encoder_optim = [optim.Adam(self.encoder[i].parameters(),
-                                         lr=encoder_lr,
-                                         weight_decay=decoder_weight_decay)
+                                         lr=encoder_lr)
                               for i, encoder_lr in enumerate(encoders_lr)]
         self.decoder_optim = [optim.Adam(self.decoder[i].parameters(),
-                                         lr=decoder_lr,
-                                         weight_decay=decoder_weight_decay)
+                                         lr=decoder_lr)
                               for i, decoder_lr in enumerate(decoders_lr)]
 
     def adamw_optimizer(self, encoders_lr, decoders_lr, decoder_weight_decay):

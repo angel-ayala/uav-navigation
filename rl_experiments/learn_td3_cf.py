@@ -112,7 +112,7 @@ if __name__ == '__main__':
         agent_class = SRLTD3Agent
         policy = SRLTD3Function
         ae_models = args2ae_model(args, env_params)
-        # approximator_params['encoder_tau'] = args.encoder_tau
+        approximator_params['encoder_tau'] = args.encoder_tau
         approximator_params['latent_dim'] = (args.latent_dim * len(ae_models),)
         agent_params['ae_models'] = ae_models
         agent_params['encoder_only'] = args.encoder_only

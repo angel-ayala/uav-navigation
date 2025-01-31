@@ -69,9 +69,9 @@ class SRLFunction:
         ae_model, ae_params = instance_autoencoder(ae_type, ae_params)
         ae_model.to(self.device)
         ae_model.apply(weight_init)
-        ae_model.adamw_optimizer(ae_params['encoder_lr'],
-                                 ae_params['decoder_lr'],
-                                 ae_params['decoder_weight_decay'])
+        ae_model.adam_optimizer(ae_params['encoder_lr'],
+                                ae_params['decoder_lr'],
+                                ae_params['decoder_weight_decay'])
         self.models.append(ae_model)
 
     def compute_z(self, observations, latent_types=None, detach=True):
@@ -121,8 +121,8 @@ class SRLFunction:
                     y_hat = ae_model.forward_y_hat(obs_1d, actions)
 
                     with torch.no_grad():
-                        z_t1 = self.critic_target.encoder(obs_1d_t1)
-                        y_curl = self.critic_target.encoder.project(z_t1)
+                        z_t1 = self.target_encoder(obs_1d_t1)
+                        y_curl = self.target_encoder.project(z_t1)
 
                     loss = ae_model.compute_regression_loss(y_curl, y_hat)
                     total_loss.append(loss)

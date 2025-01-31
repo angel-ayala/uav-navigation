@@ -12,6 +12,7 @@ from uav_navigation.srl.agent import SRLAgent
 from uav_navigation.srl.agent import SRLFunction
 from uav_navigation.srl.autoencoder import latent_l2
 from uav_navigation.srl.net import EncoderWrapper
+from uav_navigation.utils import soft_update_params
 from uav_navigation.logger import summary_scalar
 
 from .agent import SACAgent
@@ -39,7 +40,7 @@ class SRLSACFunction(SACFunction, SRLFunction):
                  is_multimodal=False,
                  use_augmentation=True,
                  encoder_tau=0.995,
-                 decoder_latent_lambda=1e-6,):
+                 decoder_latent_lambda=1e-6):
         SACFunction.__init__(self, latent_dim=latent_dim,
                              action_shape=action_shape, obs_space=obs_space,
                              hidden_dim=hidden_dim,
@@ -64,31 +65,36 @@ class SRLSACFunction(SACFunction, SRLFunction):
         SRLFunction.__init__(self, decoder_latent_lambda)
         self.encoder_tau = encoder_tau
 
-    def fuse_encoder2critic(self):
-        # Temporal copy
-        critic = copy.deepcopy(self.critic)
-        # Critic with online encoder
-        self.critic = EncoderWrapper(critic, self.models[0].encoder[0])
-        self.critic_target = copy.deepcopy(self.critic)
-        # optimizers
-        critic_lr = self.critic_optimizer.param_groups[0]['lr']
-        self.critic_optimizer = torch.optim.Adam(
-            self.critic.parameters(), lr=critic_lr)
+    def init_models(self):
+        self.target_encoder = copy.deepcopy(self.models[0].encoder[0])
+        # TODO: test with a linear layer between z (latent vector) and actor/critic functions (EncoderInterface)
 
-    def forward_actor(self, observation):
-        return self.actor(self.compute_z(observation).detach())
+    def action_inference(self, obs, sample=False):
+        # TODO: Add project from SPR?
+        return super().action_inference(self.compute_z(obs, detach=True), sample)
 
-    def forward_critic(self, observation, action):
-        z = self.critic.encoder(observation, detach=False)
+    def update_critic_target(self):
+        super().update_critic_target()
+        # Soft update the target network
+        soft_update_params(net=self.models[0].encoder[0],
+                           target_net=self.target_encoder,
+                           tau=self.encoder_tau)
+
+    def compute_critic_loss(self, sampled_data, discount, weight=None):
+        obs, action, reward, next_obs, done = sampled_data
+        obs_z = self.compute_z(obs, detach=False)
         if 'SPR' in self.models[0].type:
-            z = self.critic.encoder.project(z)
-        return self.critic.function(z, action)
+            obs_z = self.models[0].encoder[0].project(obs_z)
 
-    def forward_critic_target(self, observation, action):
-        z = self.critic_target.encoder(observation, detach=False)
+        next_obs_z = self.target_encoder(next_obs)
         if 'SPR' in self.models[0].type:
-            z = self.critic_target.encoder.project(z)
-        return self.critic_target.function(z, action)
+            obs_z = self.target_encoder.project(obs_z)
+
+        return super().compute_critic_loss(
+            [obs_z, action, reward, next_obs_z, done], discount, weight)
+
+    def update_actor_and_alpha(self, obs, weight=None):
+        super().update_actor_and_alpha(self.compute_z(obs, detach=True), weight)
 
     def save(self, path, ae_models, encoder_only=False):
         SACFunction.save(self, path)
@@ -116,7 +122,7 @@ class SRLSACAgent(SACAgent, SRLAgent):
                           memory_buffer, batch_size, sample)
         SRLAgent.__init__(self, ae_models, reconstruct_freq=reconstruct_freq,
                           srl_loss=srl_loss, priors=priors, encoder_only=encoder_only)
-        self.approximator.fuse_encoder2critic()
+        self.approximator.init_models()
 
     def update(self, step):
         SACAgent.update(self, step)
